@@ -17,12 +17,18 @@ func _process(delta: float) -> void:
 	_cluck_cd -= delta
 
 func _load_mp3(path: String) -> AudioStream:
-	if not FileAccess.file_exists(path):
-		return null
-	var f := FileAccess.open(path, FileAccess.READ)
-	var s := AudioStreamMP3.new()
-	s.data = f.get_buffer(f.get_length())
-	return s
+	# Exports ship the *imported* resource, not the source .mp3, so always try
+	# the resource loader first -- reading the raw file only works in-editor.
+	if ResourceLoader.exists(path):
+		var res = load(path)
+		if res is AudioStream:
+			return res
+	if FileAccess.file_exists(path):
+		var f := FileAccess.open(path, FileAccess.READ)
+		var s := AudioStreamMP3.new()
+		s.data = f.get_buffer(f.get_length())
+		return s
+	return null
 
 ## Occasional chicken vocalization. Rate-limited; extra calls are dropped, not queued.
 func cluck(vol_db := -12.0) -> void:
