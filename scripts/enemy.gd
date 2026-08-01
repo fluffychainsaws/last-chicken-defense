@@ -59,6 +59,12 @@ var _anim_t := 0.0
 var _target_chicken = null
 var _wings: Array = []
 var _legs: Array = []
+## Knees and shoulders, paired by index with _legs where both exist. Kept out of
+## the mesh merge so they can still articulate; _arm_rest holds each shoulder's
+## built-in pose so the swing is added to it rather than replacing it.
+var _knees: Array = []
+var _arms: Array = []
+var _arm_rest: Array = []
 var _stride := 0.0
 var _mats: Array = []
 
@@ -373,14 +379,19 @@ func _build_midget() -> void:
 		_legs.append(hip)
 		var thigh := MK.skinned(hip, MK.sphere_mesh(0.17 * s), skin, Vector3(0, -0.12 * s, 0))
 		thigh.scale = Vector3(1.0, 1.25, 1.0)
-		MK.skinned(hip, MK.sphere_mesh(0.13 * s), skin, Vector3(0, -0.32 * s, 0.01 * s))
+		# everything below the knee rides its own joint so the leg can fold
+		var knee := Node3D.new()
+		knee.position = Vector3(0, -0.26 * s, 0)
+		hip.add_child(knee)
+		_knees.append(knee)
+		MK.skinned(knee, MK.sphere_mesh(0.13 * s), skin, Vector3(0, -0.06 * s, 0.01 * s))
 		# splayed three-toed foot
-		var foot := MK.skinned(hip, MK.sphere_mesh(0.15 * s), skin, Vector3(0, -0.42 * s, 0.05 * s))
+		var foot := MK.skinned(knee, MK.sphere_mesh(0.15 * s), skin, Vector3(0, -0.16 * s, 0.05 * s))
 		foot.scale = Vector3(1.1, 0.55, 1.35)
 		if detail:
 			for t in 3:
-				var claw := MK.skinned(hip, MK.cone_mesh(0.035 * s, 0.11 * s), keratin,
-					Vector3((float(t) - 1.0) * 0.075 * s, -0.44 * s, 0.19 * s))
+				var claw := MK.skinned(knee, MK.cone_mesh(0.035 * s, 0.11 * s), keratin,
+					Vector3((float(t) - 1.0) * 0.075 * s, -0.18 * s, 0.19 * s))
 				claw.rotation.x = deg_to_rad(72)
 
 	# --- body: one big pear, widest low, leaning back over the legs ---
@@ -422,6 +433,8 @@ func _build_midget() -> void:
 		sh.rotation.x = deg_to_rad(-30)
 		sh.rotation.z = deg_to_rad(-side * 40.0)
 		torso.add_child(sh)
+		_arms.append(sh)
+		_arm_rest.append(sh.rotation.x)
 		MK.skinned(sh, MK.sphere_mesh(0.11 * s), skin, Vector3(0, -0.1 * s, 0)).scale = Vector3(1.0, 1.3, 1.0)
 		MK.skinned(sh, MK.sphere_mesh(0.085 * s), skin, Vector3(0, -0.27 * s, 0.02 * s))
 		var hand := Node3D.new()
@@ -539,9 +552,13 @@ func _build_midget() -> void:
 ## it can still swing, then everything static collapses together. Purely a
 ## draw-call saving — the geometry is unchanged.
 func _batch_body() -> void:
+	for knee in _knees:
+		MK.merge(knee)
 	for hip in _legs:
-		MK.merge(hip)
-	MK.merge(self, _legs)
+		MK.merge(hip, _knees)
+	for arm in _arms:
+		MK.merge(arm)
+	MK.merge(self, _legs + _arms)
 
 ## Frost walkers: the slow tanky wave, so they need to read as heavy. A hulking
 ## hunched slab, wider at the shoulders than the hips, crusted over with rime and
@@ -574,8 +591,12 @@ func _build_frost() -> void:
 		add_child(hip)
 		_legs.append(hip)
 		MK.skinned(hip, MK.sphere_mesh(0.19 * s, 20, 10), skin, Vector3(0, -0.2 * s, 0)).scale = Vector3(1.0, 1.5, 1.0)
-		MK.skinned(hip, MK.sphere_mesh(0.16 * s), skin, Vector3(0, -0.5 * s, 0.01 * s)).scale = Vector3(1.0, 1.3, 1.0)
-		var foot := MK.skinned(hip, MK.sphere_mesh(0.17 * s), skin, Vector3(0, -0.68 * s, 0.06 * s))
+		var knee := Node3D.new()
+		knee.position = Vector3(0, -0.4 * s, 0)
+		hip.add_child(knee)
+		_knees.append(knee)
+		MK.skinned(knee, MK.sphere_mesh(0.16 * s), skin, Vector3(0, -0.1 * s, 0.01 * s)).scale = Vector3(1.0, 1.3, 1.0)
+		var foot := MK.skinned(knee, MK.sphere_mesh(0.17 * s), skin, Vector3(0, -0.28 * s, 0.06 * s))
 		foot.scale = Vector3(1.1, 0.5, 1.5)
 
 	# --- torso: heavy slab, hunched forward, broad at the shoulders ---
@@ -611,6 +632,8 @@ func _build_frost() -> void:
 		sh.rotation.x = deg_to_rad(-14)
 		sh.rotation.z = deg_to_rad(-side * 9.0)
 		torso.add_child(sh)
+		_arms.append(sh)
+		_arm_rest.append(sh.rotation.x)
 		MK.skinned(sh, MK.sphere_mesh(0.15 * s, 20, 10), skin, Vector3(0, -0.2 * s, 0)).scale = Vector3(1.0, 1.7, 1.0)
 		MK.skinned(sh, MK.sphere_mesh(0.13 * s), skin, Vector3(0, -0.56 * s, 0.03 * s)).scale = Vector3(1.0, 1.5, 1.0)
 		MK.skinned(sh, MK.sphere_mesh(0.15 * s), skin, Vector3(0, -0.82 * s, 0.04 * s))
@@ -682,8 +705,12 @@ func _build_grey() -> void:
 		add_child(hip)
 		_legs.append(hip)
 		MK.skinned(hip, MK.sphere_mesh(0.07 * s), skin, Vector3(0, -0.2 * s, 0)).scale = Vector3(1.0, 2.8, 1.0)
-		MK.skinned(hip, MK.sphere_mesh(0.055 * s), skin, Vector3(0, -0.56 * s, 0.01 * s)).scale = Vector3(1.0, 2.6, 1.0)
-		var foot := MK.skinned(hip, MK.sphere_mesh(0.07 * s), skin, Vector3(0, -0.76 * s, 0.04 * s))
+		var knee := Node3D.new()
+		knee.position = Vector3(0, -0.4 * s, 0)
+		hip.add_child(knee)
+		_knees.append(knee)
+		MK.skinned(knee, MK.sphere_mesh(0.055 * s), skin, Vector3(0, -0.16 * s, 0.01 * s)).scale = Vector3(1.0, 2.6, 1.0)
+		var foot := MK.skinned(knee, MK.sphere_mesh(0.07 * s), skin, Vector3(0, -0.36 * s, 0.04 * s))
 		foot.scale = Vector3(0.9, 0.5, 1.6)
 
 	# --- torso: narrow, slight ribcage taper, no mass ---
@@ -703,6 +730,8 @@ func _build_grey() -> void:
 		sh.rotation.x = deg_to_rad(-10)
 		sh.rotation.z = deg_to_rad(-side * 7.0)
 		torso.add_child(sh)
+		_arms.append(sh)
+		_arm_rest.append(sh.rotation.x)
 		MK.skinned(sh, MK.sphere_mesh(0.055 * s), skin, Vector3(0, -0.2 * s, 0)).scale = Vector3(1.0, 3.2, 1.0)
 		MK.skinned(sh, MK.sphere_mesh(0.045 * s), skin, Vector3(0, -0.58 * s, 0.02 * s)).scale = Vector3(1.0, 3.0, 1.0)
 		var hand := Node3D.new()
@@ -1014,19 +1043,46 @@ func tick(delta: float) -> void:
 		if dist < 6.0:
 			want_y = 1.0
 		position.y = lerpf(position.y, want_y, delta * 2.0)
-	else:
+	elif _legs.is_empty():
+		# no legs to walk on: the old free-running bob is all there is
 		position.y = absf(sin(_anim_t * 8.0)) * 0.06 * body_scale
 
 func _move(dir: Vector3, speed: float, delta: float) -> void:
 	position += dir * speed * delta
 	if dir.length() > 0.01:
 		rotation.y = atan2(dir.x, dir.z)
-	# walkers with jointed legs stride; everything else keeps the simple bob
-	if not _legs.is_empty() and not flying:
-		_stride += delta * speed * 3.4
-		var swing := sin(_stride) * 0.5
-		for i in _legs.size():
-			_legs[i].rotation.x = swing * (1.0 if i % 2 == 0 else -1.0)
+	_walk(speed, delta)
+
+## One phase drives the whole gait — legs, knees, bob, roll and arms — so the
+## parts can't drift against each other. The old bob ran off its own fixed 8Hz
+## clock regardless of speed, which is why footfalls never lined up with it.
+##
+## Cadence falls as the creature grows: a pendulum's period goes with the square
+## root of its length, so a bigger body takes slower, longer strides while a
+## small one scurries. That single term is most of why the sizes feel different.
+func _walk(speed: float, delta: float) -> void:
+	if flying or _legs.is_empty():
+		return
+	_stride += delta * speed * 3.4 / sqrt(maxf(body_scale, 0.3))
+	var swing := sin(_stride)
+	for i in _legs.size():
+		var side := 1.0 if i % 2 == 0 else -1.0
+		_legs[i].rotation.x = swing * 0.55 * side
+	for i in _knees.size():
+		var side := 1.0 if i % 2 == 0 else -1.0
+		# a knee folds one way only. Bend peaks while the leg swings through and
+		# is zero while it carries weight, so the creature doesn't sink mid-step.
+		var bend := maxf(0.0, -sin(_stride + 0.7) * side)
+		_knees[i].rotation.x = bend * 0.85
+	for i in _arms.size():
+		var side := 1.0 if i % 2 == 0 else -1.0
+		# arms counter-swing against the legs on the same side
+		_arms[i].rotation.x = _arm_rest[i] - swing * 0.3 * side
+	# The body rises on every footfall — twice per stride cycle, hence 2x — and
+	# rolls onto whichever leg is planted. Both are small; overdone they read as
+	# a limp rather than a walk.
+	position.y = (1.0 - cos(_stride * 2.0)) * 0.022 * body_scale
+	rotation.z = swing * 0.03
 
 func ignite() -> void:
 	if state == "burn":
