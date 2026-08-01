@@ -1,0 +1,114 @@
+name: Deploy Web build to Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Allow the deploy job to publish to Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; let an in-flight run finish rather than
+# cancelling it half-published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  GODOT_VERSION: 4.7-stable
+  # Export templates live under a directory named with a '.' separator,
+  # not the '-' used in release tags (4.7-stable -> 4.7.stable).
+  GODOT_TEMPLATE_DIR: 4.7.stable
+  EXPORT_PRESET: Web
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot editor and export templates
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot-bin
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}
+
+      - name: Install Godot and export templates
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}"
+
+          curl -fsSL -o godot.zip \
+            "${base}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          curl -fsSL -o templates.tpz \
+            "${base}/Godot_v${GODOT_VERSION}_export_templates.tpz"
+
+          mkdir -p ~/godot-bin
+          unzip -q godot.zip -d godot-unpacked
+          # The zip contains a single versioned binary; don't hardcode its name.
+          find godot-unpacked -type f -name 'Godot_v*' -exec mv {} ~/godot-bin/godot \;
+          chmod +x ~/godot-bin/godot
+
+          # The .tpz unpacks to a flat 'templates/' dir that Godot expects to
+          # find renamed to the version it was built from.
+          mkdir -p ~/.local/share/godot/export_templates
+          unzip -q templates.tpz -d templates-unpacked
+          mv templates-unpacked/templates \
+            "$HOME/.local/share/godot/export_templates/${GODOT_TEMPLATE_DIR}"
+
+      - name: Add Godot to PATH
+        run: echo "$HOME/godot-bin" >> "$GITHUB_PATH"
+
+      - name: Import project resources
+        run: |
+          set -uo pipefail
+          # Godot must build its .godot/ import cache before anything can be
+          # exported. A headless import reports a non-zero status on benign
+          # warnings, so gate on the cache actually being produced instead.
+          godot --headless --path . --import || true
+          test -d .godot/imported || {
+            echo "::error::Resource import produced no .godot/imported cache"
+            exit 1
+          }
+
+      - name: Export Web build
+        run: |
+          set -euo pipefail
+          # Godot will not create the target directory itself.
+          mkdir -p build/web
+          godot --headless --path . \
+            --export-release "${EXPORT_PRESET}" build/web/index.html
+          # --export-release can exit 0 having written nothing, so verify the
+          # artifacts the browser actually needs.
+          for f in index.html index.wasm index.pck; do
+            test -s "build/web/$f" || {
+              echo "::error::Export did not produce build/web/$f"
+              exit 1
+            }
+          done
+          # Belt and braces: Pages via Actions serves the upload verbatim, but
+          # this keeps underscore-prefixed files safe if the source ever changes.
+          touch build/web/.nojekyll
+          ls -lh build/web
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

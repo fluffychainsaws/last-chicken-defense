@@ -7,6 +7,14 @@ A LITERAL DRAGON???
 
 Built with **Godot 4.7** (all placeholder models are procedural — no assets needed).
 
+## Play it
+
+**[Play in your browser →](https://fluffychainsaws.github.io/last-chicken-defense/)**
+
+Every push to `main` exports the Web build and publishes it to GitHub Pages.
+The browser build uses the WebGL2 (compatibility) renderer and ships without
+`models/*.glb`, so the goblin falls back to its procedural placeholder there.
+
 ## Run it
 
 Open the project folder in Godot 4.7+ and press **F5**, or from a terminal:
