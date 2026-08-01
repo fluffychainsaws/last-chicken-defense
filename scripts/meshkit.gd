@@ -101,6 +101,42 @@ static func sphere_mesh(r: float, segs := 16, rings := 8) -> SphereMesh:
 	m.rings = rings
 	return m
 
+static func cyl_mesh(r: float, h: float, segs := 10) -> CylinderMesh:
+	var m := CylinderMesh.new()
+	m.top_radius = r
+	m.bottom_radius = r
+	m.height = h
+	m.radial_segments = segs
+	m.rings = 1
+	return m
+
+## A thin ring — stacked with decreasing radius it reads as a ribcage, at a
+## fraction of the cost of modelling ribs individually.
+static func torus_mesh(inner: float, outer: float, ring_segs := 6, segs := 16) -> TorusMesh:
+	var m := TorusMesh.new()
+	m.inner_radius = inner
+	m.outer_radius = outer
+	m.rings = segs
+	m.ring_segments = ring_segs
+	return m
+
+## Dry matte surface: bone, horn, dead keratin. Deliberately not oily_mat —
+## clearcoat over bone reads as wet plastic.
+static func dry_mat(color: Color, tex: Texture2D = null, normal: Texture2D = null, rough := 0.72) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = color
+	if tex != null:
+		m.albedo_texture = tex
+		m.uv1_triplanar = true
+		m.uv1_scale = Vector3(2.0, 2.0, 2.0)
+	if normal != null:
+		m.normal_enabled = true
+		m.normal_texture = normal
+		m.normal_scale = 1.1
+	m.roughness = rough
+	m.metallic_specular = 0.35
+	return m
+
 static func cone_mesh(r: float, h: float, segs := 8) -> CylinderMesh:
 	var m := CylinderMesh.new()
 	m.top_radius = 0.0
