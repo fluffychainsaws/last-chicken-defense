@@ -1013,6 +1013,11 @@ func _load_game() -> void:
 func _run_shot_test(dir: String) -> void:
 	start_new()
 	phase_t = 0.35  # mid-morning light for the day shot
+	# pose a few chickens in front of the camera, facing it, frozen
+	for i in mini(5, chickens.size()):
+		chickens[i].position = Vector3(-11.5 + float(i) * 0.9, 0, 1.6 - absf(float(i) - 2.0) * 0.5)
+		chickens[i].rotation.y = 0.0
+		chickens[i].state = "carried"  # test-only: freezes the AI for the photo
 	await get_tree().create_timer(2.0).timeout
 	# regression check: synthetic mouse motion must rotate the camera
 	var rot_before: float = player.rotation.y

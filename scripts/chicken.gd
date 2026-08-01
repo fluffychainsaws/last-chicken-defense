@@ -35,23 +35,65 @@ func setup(g: Node3D, pos: Vector3, chick: bool) -> void:
 		scale = Vector3.ONE * 0.45
 
 func _build_mesh() -> void:
-	var body_col: Color = [Color(0.94, 0.91, 0.84), Color(0.76, 0.55, 0.32), Color(0.9, 0.82, 0.65)][randi() % 3]
-	var body := MK.sphere(self, 0.32, body_col, Vector3(0, 0.36, 0))
-	body.scale = Vector3(0.9, 0.85, 1.15)
+	# deranged clipart-chicken look: scraggly feathers, googly eyes, gangly everything
+	var palettes := [
+		[Color(0.13, 0.13, 0.15), Color(0.4, 0.4, 0.44)],    # charcoal
+		[Color(0.55, 0.55, 0.58), Color(0.22, 0.22, 0.25)],  # gray
+		[Color(0.75, 0.42, 0.16), Color(0.45, 0.2, 0.08)],   # rusty orange
+		[Color(0.5, 0.34, 0.18), Color(0.82, 0.52, 0.2)],    # brown / ginger
+		[Color(0.92, 0.88, 0.76), Color(0.55, 0.45, 0.3)],   # cream / tan
+		[Color(0.95, 0.94, 0.9), Color(0.55, 0.55, 0.58)],   # white / gray
+	]
+	var pal: Array = palettes[randi() % palettes.size()]
+	var body_col: Color = pal[0].lightened(randf() * 0.08)
+	var accent: Color = pal[1]
+	var leg_col := Color(0.9, 0.62, 0.2)
+	# scrawny legs + big feet
+	for side in [-1.0, 1.0]:
+		MK.cyl(self, 0.022, 0.022, 0.32, leg_col, Vector3(side * 0.07, 0.16, 0))
+		MK.box(self, Vector3(0.09, 0.02, 0.13), leg_col, Vector3(side * 0.07, 0.01, 0.04))
+	# body (smaller, higher = ganglier)
+	var body := MK.sphere(self, 0.27, body_col, Vector3(0, 0.5, 0))
+	body.scale = Vector3(0.85, 0.95, 1.05)
 	_body_mat = body.material_override
-	# head group sits forward (+Z is our facing direction)
+	# scraggly feather spikes bursting off the body
+	for i in 14:
+		var dir := Vector3(randf_range(-1, 1), randf_range(-0.2, 1), randf_range(-1, 0.4)).normalized()
+		var sp := MK.cyl(self, 0.0, 0.05, randf_range(0.2, 0.38), body_col.lerp(accent, randf() * 0.8), Vector3(0, 0.5, 0) + dir * 0.24)
+		sp.quaternion = Quaternion(Vector3.UP, dir)
+	# unhinged tail spray
+	for i in 6:
+		var tdir := Vector3(randf_range(-0.35, 0.35), randf_range(0.5, 1.1), randf_range(-1.3, -0.8)).normalized()
+		var tl := randf_range(0.35, 0.55)
+		var tsp := MK.cyl(self, 0.0, 0.055, tl, accent.lerp(Color(0.85, 0.3, 0.1), randf() * 0.5), Vector3(0, 0.6, -0.26) + tdir * tl * 0.4)
+		tsp.quaternion = Quaternion(Vector3.UP, tdir)
+	# gangly neck, random length
+	var neck_h := randf_range(0.1, 0.3)
+	var neck := MK.cyl(self, 0.045, 0.065, neck_h + 0.18, body_col, Vector3(0, 0.66 + neck_h * 0.5, 0.16))
+	neck.rotation.x = deg_to_rad(-12)
+	# head
 	_head = Node3D.new()
-	_head.position = Vector3(0, 0.62, 0.26)
+	_head.position = Vector3(0, 0.8 + neck_h, 0.22)
 	add_child(_head)
-	MK.sphere(_head, 0.16, body_col, Vector3.ZERO)
-	MK.cyl(_head, 0.0, 0.05, 0.14, Color(0.95, 0.6, 0.1), Vector3(0, 0.0, 0.19)).rotation.x = deg_to_rad(90)
-	MK.box(_head, Vector3(0.05, 0.12, 0.1), Color(0.85, 0.15, 0.1), Vector3(0, 0.18, 0.0))
-	MK.sphere(_head, 0.03, Color(0.05, 0.05, 0.05), Vector3(0.1, 0.04, 0.1))
-	MK.sphere(_head, 0.03, Color(0.05, 0.05, 0.05), Vector3(-0.1, 0.04, 0.1))
-	# tail + legs
-	MK.cyl(self, 0.0, 0.1, 0.22, body_col.darkened(0.25), Vector3(0, 0.5, -0.32)).rotation.x = deg_to_rad(-50)
-	MK.cyl(self, 0.03, 0.03, 0.2, Color(0.95, 0.6, 0.1), Vector3(0.09, 0.1, 0))
-	MK.cyl(self, 0.03, 0.03, 0.2, Color(0.95, 0.6, 0.1), Vector3(-0.09, 0.1, 0))
+	MK.sphere(_head, 0.12, body_col, Vector3.ZERO)
+	# giant mismatched googly eyes with wandering pupils
+	for side in [-1.0, 1.0]:
+		var er := randf_range(0.06, 0.105)
+		var epos := Vector3(side * 0.08, 0.04 + randf_range(-0.015, 0.03), 0.06)
+		MK.sphere(_head, er, Color(0.97, 0.96, 0.93), epos)
+		MK.sphere(_head, er * 0.42, Color(0.05, 0.04, 0.04), epos + Vector3(randf_range(-0.025, 0.025), randf_range(-0.025, 0.02), er * 0.82))
+	# beak, permanently mid-squawk
+	var top_beak := MK.cyl(_head, 0.0, 0.042, 0.16, Color(0.95, 0.6, 0.1), Vector3(0, -0.01, 0.15))
+	top_beak.rotation.x = deg_to_rad(78)
+	var bot_beak := MK.cyl(_head, 0.0, 0.035, 0.12, Color(0.85, 0.5, 0.08), Vector3(0, -0.07, 0.13))
+	bot_beak.rotation.x = deg_to_rad(112)
+	# wild comb: red spikes flopping at random angles
+	for i in 2 + randi() % 3:
+		var cs := MK.cyl(_head, 0.0, 0.028, randf_range(0.08, 0.17), Color(0.8, 0.12, 0.1), Vector3(randf_range(-0.03, 0.03), 0.1, randf_range(-0.05, 0.04)))
+		cs.rotation.z = randf_range(-0.6, 0.6)
+		cs.rotation.x = randf_range(-0.4, 0.3)
+	# wattle
+	MK.sphere(_head, 0.032, Color(0.75, 0.12, 0.1), Vector3(0, -0.1, 0.08))
 
 func apply_helmet() -> void:
 	if _helmet != null or _head == null:
