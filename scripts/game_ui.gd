@@ -1,0 +1,408 @@
+extends CanvasLayer
+## All 2D UI: HUD, hotbar, announcements, whispers, Farmers Market, overlays.
+
+var game: Node3D
+
+var _hp_fill: ColorRect
+var _hp_label: Label
+var _chips := {}
+var _clock: Label
+var _announce_big: Label
+var _announce_sub: Label
+var _prompt: Label
+var _whisper: Label
+var _hotbar_slots: Array = []
+var _damage_flash: ColorRect
+var _night_shade: ColorRect
+var _market_panel: PanelContainer
+var _market_body: VBoxContainer
+var _overlay: Control
+var _crosshair: Label
+
+const FONT_BIG := 42
+const FONT_MED := 20
+
+func setup(g: Node3D) -> void:
+	game = g
+	layer = 10
+	_build_fx()
+	_build_hud()
+	_build_market()
+	_overlay = Control.new()
+	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(_overlay)
+
+func _label(parent: Node, text: String, size: int, color := Color.WHITE) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	l.add_theme_constant_override("outline_size", 6)
+	parent.add_child(l)
+	return l
+
+func _chip(parent: Node, key: String, text: String, color := Color.WHITE) -> void:
+	var p := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.07, 0.05, 0.72)
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
+	style.content_margin_left = 10
+	style.content_margin_right = 10
+	style.content_margin_top = 4
+	style.content_margin_bottom = 4
+	p.add_theme_stylebox_override("panel", style)
+	parent.add_child(p)
+	_chips[key] = _label(p, text, 17, color)
+
+func _build_fx() -> void:
+	_night_shade = ColorRect.new()
+	_night_shade.color = Color(0.02, 0.02, 0.1, 0.0)
+	_night_shade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_night_shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_night_shade)
+	_damage_flash = ColorRect.new()
+	_damage_flash.color = Color(0.8, 0.05, 0.05, 0.0)
+	_damage_flash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_damage_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_damage_flash)
+
+func _build_hud() -> void:
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(root)
+	# crosshair
+	_crosshair = _label(root, "+", 22, Color(1, 1, 1, 0.8))
+	_crosshair.anchor_left = 0.5
+	_crosshair.anchor_right = 0.5
+	_crosshair.anchor_top = 0.5
+	_crosshair.anchor_bottom = 0.5
+	_crosshair.offset_left = -7.0
+	_crosshair.offset_top = -16.0
+	# top-right: clock chip
+	var top := HBoxContainer.new()
+	top.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	top.position += Vector2(-360, 12)
+	top.add_theme_constant_override("separation", 8)
+	root.add_child(top)
+	_chip(top, "clock", "Day 1   6:00 a.m.", Color(1, 0.9, 0.6))
+	# top-left: status chips
+	var tl := HBoxContainer.new()
+	tl.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	tl.position = Vector2(12, 12)
+	tl.add_theme_constant_override("separation", 8)
+	root.add_child(tl)
+	_chip(tl, "coins", "$ 25", Color(1, 0.85, 0.3))
+	_chip(tl, "eggs", "EGGS 0", Color(1, 1, 1))
+	_chip(tl, "feed", "FEED 5", Color(0.85, 0.75, 0.5))
+	_chip(tl, "shells", "SHELLS 0", Color(0.9, 0.5, 0.4))
+	_chip(tl, "hens", "HENS 10", Color(0.95, 0.9, 0.8))
+	_chip(tl, "coop", "COOP 100%", Color(0.7, 0.9, 0.7))
+	# bottom-left: hp
+	var hp_box := Control.new()
+	hp_box.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	hp_box.position = Vector2(16, -56)
+	root.add_child(hp_box)
+	var hp_bg := ColorRect.new()
+	hp_bg.color = Color(0, 0, 0, 0.55)
+	hp_bg.size = Vector2(240, 22)
+	hp_box.add_child(hp_bg)
+	_hp_fill = ColorRect.new()
+	_hp_fill.color = Color(0.75, 0.2, 0.15)
+	_hp_fill.position = Vector2(2, 2)
+	_hp_fill.size = Vector2(236, 18)
+	hp_box.add_child(_hp_fill)
+	_hp_label = _label(hp_box, "100 / 100", 15)
+	_hp_label.position = Vector2(8, -2)
+	# announcements
+	var center := VBoxContainer.new()
+	center.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	center.position += Vector2(-420, 90)
+	center.custom_minimum_size = Vector2(840, 0)
+	center.alignment = BoxContainer.ALIGNMENT_CENTER
+	root.add_child(center)
+	_announce_big = _label(center, "", FONT_BIG, Color(1, 0.95, 0.85))
+	_announce_big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_announce_sub = _label(center, "", FONT_MED, Color(0.9, 0.55, 0.5))
+	_announce_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_announce_big.modulate.a = 0.0
+	_announce_sub.modulate.a = 0.0
+	# prompt
+	_prompt = _label(root, "", 19, Color(1, 1, 0.85))
+	_prompt.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_prompt.position += Vector2(-200, -140)
+	_prompt.custom_minimum_size = Vector2(400, 0)
+	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# whisper
+	_whisper = _label(root, "", 18, Color(0.75, 0.1, 0.12))
+	_whisper.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_whisper.position += Vector2(-300, -200)
+	_whisper.custom_minimum_size = Vector2(600, 0)
+	_whisper.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_whisper.modulate.a = 0.0
+	# hotbar
+	var bar := HBoxContainer.new()
+	bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	bar.position += Vector2(-240, -46)
+	bar.add_theme_constant_override("separation", 6)
+	root.add_child(bar)
+	for i in 4:
+		var p := PanelContainer.new()
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(0.08, 0.07, 0.05, 0.72)
+		style.border_color = Color(1, 0.85, 0.3)
+		style.content_margin_left = 10
+		style.content_margin_right = 10
+		style.content_margin_top = 6
+		style.content_margin_bottom = 6
+		p.add_theme_stylebox_override("panel", style)
+		bar.add_child(p)
+		var l := _label(p, "", 15)
+		l.custom_minimum_size = Vector2(96, 0)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_hotbar_slots.append({"panel": p, "style": style, "label": l})
+
+func refresh() -> void:
+	var pl = game.player
+	_hp_fill.size.x = 236.0 * clampf(pl.hp / pl.max_hp, 0.0, 1.0)
+	_hp_label.text = "%d / %d" % [int(maxf(0, pl.hp)), int(pl.max_hp)]
+	_chips["coins"].text = "$ %d" % game.coins
+	_chips["eggs"].text = "EGGS %d" % game.eggs
+	_chips["feed"].text = "FEED %d" % game.feed
+	_chips["shells"].text = "SHELLS %d" % game.shells
+	var hens := 0
+	var chicks := 0
+	for c in game.chickens:
+		if c.is_chick:
+			chicks += 1
+		else:
+			hens += 1
+	var hen_txt := "HENS %d" % hens
+	if chicks > 0:
+		hen_txt += " +%d chick" % chicks
+	if game.upgrades.rooster:
+		hen_txt += " +ROO"
+	_chips["hens"].text = hen_txt
+	var pct := int(100.0 * game.coop_hp / game.max_coop_hp())
+	_chips["coop"].text = ("ARMORY %d%%" if game.is_night else "COOP %d%%") % pct
+	_chips["coop"].add_theme_color_override("font_color", Color(0.7, 0.9, 0.7) if pct > 50 else Color(1, 0.4, 0.3))
+	_chips["clock"].text = game.clock_text()
+	update_hotbar()
+
+func update_hotbar() -> void:
+	var names := ["SHOVEL", "SHOTGUN", "FEED", "EGG"]
+	var counts := ["", ("x%d" % game.shells) if game.upgrades.shotgun else "LOCKED", "x%d" % game.feed, "x%d" % game.eggs]
+	for i in 4:
+		var s = _hotbar_slots[i]
+		s.label.text = "%d  %s %s" % [i + 1, names[i], counts[i]]
+		s.style.border_width_top = 2 if game.player.slot == i else 0
+		s.style.border_width_bottom = 2 if game.player.slot == i else 0
+		s.style.border_width_left = 2 if game.player.slot == i else 0
+		s.style.border_width_right = 2 if game.player.slot == i else 0
+
+func set_prompt(text) -> void:
+	_prompt.text = text if text != null else ""
+
+func announce(big: String, sub := "", shake := false) -> void:
+	_announce_big.text = big
+	_announce_sub.text = sub
+	var tw := create_tween()
+	_announce_big.modulate.a = 0.0
+	_announce_sub.modulate.a = 0.0
+	tw.tween_property(_announce_big, "modulate:a", 1.0, 0.15)
+	tw.parallel().tween_property(_announce_sub, "modulate:a", 1.0, 0.3)
+	tw.tween_interval(3.2)
+	tw.tween_property(_announce_big, "modulate:a", 0.0, 0.6)
+	tw.parallel().tween_property(_announce_sub, "modulate:a", 0.0, 0.6)
+	if shake:
+		var tw2 := create_tween()
+		for i in 12:
+			tw2.tween_property(_announce_big, "position:x", randf_range(-6, 6), 0.04)
+		tw2.tween_property(_announce_big, "position:x", 0.0, 0.04)
+
+func whisper(text: String) -> void:
+	_whisper.text = text.to_lower()
+	var tw := create_tween()
+	_whisper.modulate.a = 0.0
+	tw.tween_property(_whisper, "modulate:a", 0.85, 0.8)
+	tw.tween_interval(2.2)
+	tw.tween_property(_whisper, "modulate:a", 0.0, 1.2)
+
+func flash_damage() -> void:
+	_damage_flash.color.a = 0.35
+	var tw := create_tween()
+	tw.tween_property(_damage_flash, "color:a", 0.0, 0.45)
+
+func night_fx(on: bool, boss := false) -> void:
+	var tw := create_tween()
+	var target := 0.0
+	if on:
+		target = 0.22 if not boss else 0.3
+	var col := Color(0.25, 0.02, 0.05) if boss else Color(0.02, 0.02, 0.1)
+	_night_shade.color = Color(col.r, col.g, col.b, _night_shade.color.a)
+	tw.tween_property(_night_shade, "color:a", target, 2.0)
+
+# ---------- Farmers Market ----------
+
+func _build_market() -> void:
+	_market_panel = PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.06, 0.08, 0.06, 0.96)
+	style.border_color = Color(0.3, 0.8, 0.4)
+	style.border_width_top = 2
+	style.border_width_bottom = 2
+	style.border_width_left = 2
+	style.border_width_right = 2
+	style.content_margin_left = 18
+	style.content_margin_right = 18
+	style.content_margin_top = 12
+	style.content_margin_bottom = 12
+	_market_panel.add_theme_stylebox_override("panel", style)
+	_market_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_market_panel.custom_minimum_size = Vector2(760, 560)
+	_market_panel.visible = false
+	add_child(_market_panel)
+	_market_body = VBoxContainer.new()
+	_market_body.add_theme_constant_override("separation", 6)
+	_market_panel.add_child(_market_body)
+
+func open_market() -> void:
+	_market_panel.visible = true
+	_render_market()
+
+func close_market() -> void:
+	_market_panel.visible = false
+
+func _clear(node: Node) -> void:
+	for ch in node.get_children():
+		ch.queue_free()
+
+func _render_market() -> void:
+	_clear(_market_body)
+	if game.is_night:
+		_label(_market_body, "NO SIGNAL", 40, Color(0.8, 0.2, 0.2))
+		_label(_market_body, "the market sleeps. you should not be indoors.", 18, Color(0.6, 0.6, 0.6))
+		_label(_market_body, "", 14)
+		var btn0 := Button.new()
+		btn0.text = "STEP AWAY FROM THE COMPUTER"
+		btn0.pressed.connect(func(): game.close_market())
+		_market_body.add_child(btn0)
+		return
+	var title := _label(_market_body, "FARMERSMARKET.NET", 34, Color(0.5, 1, 0.6))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_label(_market_body, "est. 1997  -  now with 40%% fewer curses  -  you have $ %d" % game.coins, 16, Color(0.75, 0.85, 0.75))
+	var sell := Button.new()
+	sell.text = "SELL ALL EGGS  (%d x $6 = $%d)" % [game.eggs, game.eggs * 6]
+	sell.disabled = game.eggs <= 0
+	sell.pressed.connect(func(): game.sell_eggs())
+	_market_body.add_child(sell)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(720, 380)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_market_body.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", 4)
+	scroll.add_child(list)
+	for item in game.market_items():
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		list.add_child(row)
+		var col := VBoxContainer.new()
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(col)
+		_label(col, item.name, 18, Color(1, 0.95, 0.8))
+		_label(col, item.desc, 13, Color(0.65, 0.7, 0.65))
+		var btn := Button.new()
+		if item.owned:
+			btn.text = "OWNED"
+			btn.disabled = true
+		else:
+			btn.text = "$ %d" % item.price
+			btn.disabled = game.coins < item.price
+			var id: String = item.id
+			btn.pressed.connect(func(): game.buy(id))
+		btn.custom_minimum_size = Vector2(110, 0)
+		row.add_child(btn)
+	var close := Button.new()
+	close.text = "CLOSE  [ESC]"
+	close.pressed.connect(func(): game.close_market())
+	_market_body.add_child(close)
+
+func market_refresh() -> void:
+	if _market_panel.visible:
+		_render_market()
+
+# ---------- Overlays ----------
+
+func clear_overlay() -> void:
+	for ch in _overlay.get_children():
+		ch.queue_free()
+
+func _overlay_panel() -> VBoxContainer:
+	clear_overlay()
+	var bg := ColorRect.new()
+	bg.color = Color(0.02, 0.02, 0.03, 0.88)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_overlay.add_child(bg)
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_CENTER)
+	box.custom_minimum_size = Vector2(700, 0)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 10)
+	_overlay.add_child(box)
+	return box
+
+func show_start(has_save: bool) -> void:
+	var box := _overlay_panel()
+	var t := _label(box, "LAST CHICKEN DEFENSE", 52, Color(1, 0.85, 0.3))
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var s := _label(box, "T H E   A R M A E G G I N", 24, Color(0.8, 0.25, 0.2))
+	s.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_label(box, "", 10)
+	_label(box, "By day: feed the hens, fix the coop, send them foraging.", 17, Color(0.8, 0.85, 0.8))
+	_label(box, "By night: something comes out of the trees. It wants chicken.", 17, Color(0.8, 0.5, 0.5))
+	_label(box, "", 10)
+	_label(box, "WASD move   SHIFT sprint   SPACE jump   MOUSE look/attack", 15, Color(0.6, 0.65, 0.6))
+	_label(box, "E interact   1-4 / wheel items   ESC pause", 15, Color(0.6, 0.65, 0.6))
+	_label(box, "", 10)
+	if has_save:
+		var cont := Button.new()
+		cont.text = "CONTINUE  (Day %d)" % game.peek_save_day()
+		cont.pressed.connect(func(): game.start_continue())
+		box.add_child(cont)
+	var new_btn := Button.new()
+	new_btn.text = "NEW GAME"
+	new_btn.pressed.connect(func(): game.start_new())
+	box.add_child(new_btn)
+
+func show_pause() -> void:
+	var box := _overlay_panel()
+	var t := _label(box, "PAUSED", 44, Color(1, 0.95, 0.85))
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_label(box, "the chickens are waiting.", 16, Color(0.6, 0.65, 0.6))
+	var btn := Button.new()
+	btn.text = "RESUME"
+	btn.pressed.connect(func(): game.unpause())
+	box.add_child(btn)
+
+func show_downed() -> void:
+	var box := _overlay_panel()
+	var t := _label(box, "YOU BLACKED OUT", 44, Color(0.9, 0.2, 0.15))
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_label(box, "you wake at dawn. your wallet feels lighter. the chickens saw everything.", 16, Color(0.7, 0.6, 0.6))
+
+func show_game_over(days: int) -> void:
+	var box := _overlay_panel()
+	var t := _label(box, "THE ARMAEGGIN HAS COME", 46, Color(0.9, 0.2, 0.15))
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_label(box, "every last chicken is gone. the yard is silent.", 18, Color(0.75, 0.65, 0.65))
+	_label(box, "you survived %d days." % days, 18, Color(1, 0.85, 0.3))
+	var btn := Button.new()
+	btn.text = "TRY AGAIN"
+	btn.pressed.connect(func(): game.restart())
+	box.add_child(btn)
