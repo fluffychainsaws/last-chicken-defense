@@ -23,11 +23,21 @@ const THEMES := [
 	{"id": "dragon", "name": "A LITERAL DRAGON???", "sub": "of course it wants chicken", "body": Color(0.55, 0.15, 0.6), "eye": Color(1, 0.5, 0.1), "scale": 2.0, "speed": 5.0, "hp": 500.0, "dmg": 30.0, "bounty": 100, "base": 1.0, "per": 0.0, "boss": true, "min_night": 8, "flying": true, "wings": true},
 ]
 
+## Themes with a body of their own rather than the shared placeholder. The first
+## few nights draw only from these, so a new player meets the ones that actually
+## look like something before the generic capsules turn up.
+const FEATURED := ["goblin", "midget"]
+const FEATURED_NIGHTS := 3
+
 static func pick_theme(night: int) -> Dictionary:
 	var bosses := THEMES.filter(func(t): return t.get("boss", false) and night >= t.get("min_night", 99))
 	var normals := THEMES.filter(func(t): return not t.get("boss", false))
 	if night % 4 == 0 and bosses.size() > 0:
 		return bosses[randi() % bosses.size()]
+	if night <= FEATURED_NIGHTS:
+		var featured := normals.filter(func(t): return t["id"] in FEATURED)
+		if featured.size() > 0:
+			return featured[randi() % featured.size()]
 	return normals[randi() % normals.size()]
 
 var game: Node3D

@@ -16,15 +16,26 @@ func _initialize() -> void:
 		elif not a.begins_with("-"):
 			want = a
 
-	var theme := {}
-	for t in ENEMY.THEMES:
-		if t["id"] == want:
-			theme = t
-			break
-	if theme.is_empty():
-		print("no such theme: ", want)
-		quit(1)
-		return
+	# "all" lines up one of every theme; "normals"/"bosses" split them so the
+	# scales stay comparable within a shot. Otherwise: five of one theme.
+	var lineup := []
+	if want in ["all", "normals", "bosses"]:
+		for t in ENEMY.THEMES:
+			var is_boss: bool = t.get("boss", false)
+			if want == "all" or (want == "bosses") == is_boss:
+				lineup.append(t)
+	else:
+		var theme := {}
+		for t in ENEMY.THEMES:
+			if t["id"] == want:
+				theme = t
+				break
+		if theme.is_empty():
+			print("no such theme: ", want)
+			quit(1)
+			return
+		for i in 5:
+			lineup.append(theme)
 
 	root.size = Vector2i(1400, 720)
 	var world := Node3D.new()
@@ -61,23 +72,39 @@ func _initialize() -> void:
 	world.add_child(ground)
 
 	seed(20260801)
-	var n := 5
-	for i in n:
+	# Space each one by its own bulk, so a 2.6-scale bigfoot doesn't overlap the
+	# 0.6-scale midget next to it.
+	var widths := []
+	var total := 0.0
+	for t in lineup:
+		var w: float = 0.85 + float(t["scale"]) * 0.95
+		widths.append(w)
+		total += w
+	var x := -total * 0.5
+	var tallest := 0.0
+	for i in lineup.size():
+		var t: Dictionary = lineup[i]
 		var e3 := Node3D.new()
 		e3.set_script(ENEMY)
 		world.add_child(e3)
-		e3.theme = theme.duplicate()
-		e3.body_scale = theme["scale"]
-		e3.spd = theme["speed"]
+		e3.theme = t.duplicate()
+		e3.body_scale = t["scale"]
+		e3.spd = t["speed"]
 		e3._build_mesh()
-		e3.position = Vector3((float(i) - float(n - 1) * 0.5) * 0.95, 0, 0)
+		x += widths[i] * 0.5
+		e3.position = Vector3(x, 0, 0)
+		x += widths[i] * 0.5
 		# faces point +Z, same as the camera's side, so 0 yaw looks down the lens
-		e3.rotation.y = deg_to_rad((float(i) - 2.0) * 8.0)
+		e3.rotation.y = deg_to_rad(randf_range(-9, 9))
+		tallest = maxf(tallest, float(t["scale"]))
 
 	var cam := Camera3D.new()
-	cam.position = Vector3(0, 0.78, 4.1)
+	# Frame the row on both axes: back off with its width, but also with its
+	# tallest member — a boss is deep as well as tall (the dragon's neck reaches
+	# metres toward the lens), so width alone crops them.
+	cam.position = Vector3(0, 0.5 + tallest * 1.15, maxf(maxf(4.1, total * 0.8), tallest * 5.2))
 	cam.rotation.x = deg_to_rad(-7)
-	cam.fov = 46
+	cam.fov = 50
 	world.add_child(cam)
 	cam.make_current()
 
