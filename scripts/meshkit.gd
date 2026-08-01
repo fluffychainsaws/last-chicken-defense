@@ -122,7 +122,10 @@ static func torus_mesh(inner: float, outer: float, ring_segs := 6, segs := 16) -
 
 ## Dry matte surface: bone, horn, dead keratin. Deliberately not oily_mat —
 ## clearcoat over bone reads as wet plastic.
-static func dry_mat(color: Color, tex: Texture2D = null, normal: Texture2D = null, rough := 0.72) -> StandardMaterial3D:
+## `sss` suits bare skin — hands, feet, a face — which wants light bleeding
+## through it but not the lacquer that oily_mat adds. Clearcoat over pale hide
+## reads as chrome.
+static func dry_mat(color: Color, tex: Texture2D = null, normal: Texture2D = null, rough := 0.72, sss := false) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = color
 	if tex != null:
@@ -135,6 +138,10 @@ static func dry_mat(color: Color, tex: Texture2D = null, normal: Texture2D = nul
 		m.normal_scale = 1.1
 	m.roughness = rough
 	m.metallic_specular = 0.35
+	if sss and not OS.has_feature("web"):
+		m.subsurf_scatter_enabled = true
+		m.subsurf_scatter_strength = 0.45
+		m.subsurf_scatter_skin_mode = true
 	return m
 
 static func cone_mesh(r: float, h: float, segs := 8) -> CylinderMesh:
