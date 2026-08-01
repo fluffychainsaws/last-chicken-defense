@@ -155,12 +155,40 @@ func _build_environment() -> void:
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.tonemap_exposure = 1.3
+	# Glow runs on both renderers, but the wide blur levels and the HDR threshold
+	# pass only earn their cost on desktop, so web keeps the narrow cheap version.
 	env.glow_enabled = true
-	env.glow_intensity = 0.5
-	env.glow_bloom = 0.05
+	env.glow_intensity = 0.5 if is_web else 0.9
+	env.glow_bloom = 0.05 if is_web else 0.14
+	if not is_web:
+		env.glow_strength = 1.0
+		env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
+		# AgX holds most of the frame under 1.0, so a threshold just below it
+		# means only genuinely hot things bloom: emissive eyes, the red moon,
+		# the muzzle flash, the white damage flash.
+		env.glow_hdr_threshold = 0.9
+		env.glow_hdr_scale = 2.0
+		# weight the wider levels, so hot spots bleed across the frame instead of
+		# picking up a tight halo. Named with '/' so they need set().
+		env.set("glow_levels/1", 0.0)
+		env.set("glow_levels/2", 0.3)
+		env.set("glow_levels/3", 0.7)
+		env.set("glow_levels/4", 1.0)
+		env.set("glow_levels/5", 0.7)
+	# SSAO and SSIL exist only under forward_plus. The compatibility renderer
+	# ignores them outright, so web needs no fallback beyond leaving them off.
 	env.ssao_enabled = not is_web
-	env.ssao_intensity = 1.6
+	env.ssao_intensity = 2.6
+	env.ssao_radius = 1.1
+	env.ssao_power = 2.0
+	env.ssao_detail = 0.6
+	env.ssao_horizon = 0.05
+	# bleed a little AO into direct light too, not just ambient — the contact
+	# shadows under the coop and fence read better under a low sun
+	env.ssao_light_affect = 0.15
 	env.ssil_enabled = not is_web
+	env.ssil_intensity = 0.9
+	env.ssil_radius = 3.0
 	env.fog_enabled = true
 	env.fog_density = 0.0006
 	env.fog_aerial_perspective = 0.7
