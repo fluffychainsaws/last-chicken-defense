@@ -94,6 +94,12 @@ func _build_mesh() -> void:
 	if theme.get("id", "") == "midget":
 		_build_midget()
 		return
+	if theme.get("id", "") == "frost":
+		_build_frost()
+		return
+	if theme.get("id", "") == "grey":
+		_build_grey()
+		return
 	var s: float = body_scale
 	var body_c: Color = theme["body"]
 	var eye_c: Color = theme["eye"]
@@ -308,18 +314,19 @@ func _build_goblin_procedural(s: float) -> void:
 			tuft.rotation.x = randf_range(-0.5, 0.2)
 			tuft.rotation.z = randf_range(-0.5, 0.5)
 
-## Skin maps are identical across the whole wave, so build them once. The
-## materials that use them stay per-instance — a shared material would make one
-## midget taking a shotgun blast flash every other midget on the map.
-static var _midget_tex: Texture2D = null
-static var _midget_norm: Texture2D = null
+## Skin maps are identical across a whole wave, so build each set once and share
+## it. The materials that use them stay per-instance — a shared material would
+## make one enemy taking a shotgun blast flash every other one on the map.
+static var _skin_cache := {}
 
-static func _midget_skin() -> Array:
-	if _midget_tex == null:
-		# low frequency = broad blotchy mottling; the normal runs finer for warts
-		_midget_tex = MK.noise_tex(7717, 0.05, 4, false, 0.55)
-		_midget_norm = MK.noise_tex(4242, 0.16, 4, true)
-	return [_midget_tex, _midget_norm]
+## albedo_freq low = broad blotchy mottling; normal_freq higher = finer bumps.
+static func skin_maps(key: String, albedo_seed: int, albedo_freq: float, normal_seed: int, normal_freq: float) -> Array:
+	if not _skin_cache.has(key):
+		_skin_cache[key] = [
+			MK.noise_tex(albedo_seed, albedo_freq, 4, false, 0.55),
+			MK.noise_tex(normal_seed, normal_freq, 4, true),
+		]
+	return _skin_cache[key]
 
 ## Furious midget people: squat, greasy, mostly eyes and teeth. Built as a
 ## bottom-heavy lump — no neck, tiny arms, stubby legs — so the silhouette reads
@@ -349,7 +356,7 @@ func _build_midget() -> void:
 	]
 	var iris_c: Color = irises[randi() % irises.size()]
 
-	var maps := _midget_skin()
+	var maps := skin_maps("midget", 7717, 0.05, 4242, 0.16)
 	var skin := MK.oily_mat(hide, maps[0], maps[1], 2.2)
 	var belly := MK.oily_mat(hide.lightened(0.28), maps[0], maps[1], 2.6)
 	# horn and claw keratin: still wet-looking, but harder and less mottled
@@ -526,6 +533,212 @@ func _build_midget() -> void:
 		MK.sphere(club, 0.055 * s, wood.darkened(0.1), Vector3(0, length * 0.9, 0))
 		if randf() < 0.5:
 			MK.sphere(club, 0.03 * s, wood.lightened(0.08), Vector3(0.02 * s, length * 0.6, 0))
+
+## Frost walkers: the slow tanky wave, so they need to read as heavy. A hulking
+## hunched slab, wider at the shoulders than the hips, crusted over with rime and
+## sprouting ice off its back. Everything about the build says "hard to move".
+func _build_frost() -> void:
+	body_scale *= randf_range(0.9, 1.15)
+	var s: float = body_scale
+	var detail := not OS.has_feature("web")
+
+	var hides := [
+		Color(0.44, 0.66, 0.80), Color(0.52, 0.74, 0.84),
+		Color(0.38, 0.58, 0.76), Color(0.58, 0.78, 0.86),
+	]
+	var hide: Color = hides[randi() % hides.size()]
+	var rime := Color(0.88, 0.95, 0.99)
+	var eye_c := Color(0.7, 0.95, 1.0)
+
+	var maps := skin_maps("frost", 3311, 0.07, 9182, 0.24)
+	# frozen hide: wet-ice specular over a cracked normal
+	var skin := MK.oily_mat(hide, maps[0], maps[1], 1.6, 0.14)
+	# ice itself is smoother and brighter than the flesh under it
+	var ice := MK.oily_mat(rime, null, null, 1.0, 0.05)
+	_mats.append(skin)
+	_mats.append(ice)
+
+	# --- legs: short and thick, planted wide ---
+	for side in [-1.0, 1.0]:
+		var hip := Node3D.new()
+		hip.position = Vector3(side * 0.26 * s, 0.72 * s, 0)
+		add_child(hip)
+		_legs.append(hip)
+		MK.skinned(hip, MK.sphere_mesh(0.19 * s, 20, 10), skin, Vector3(0, -0.2 * s, 0)).scale = Vector3(1.0, 1.5, 1.0)
+		MK.skinned(hip, MK.sphere_mesh(0.16 * s), skin, Vector3(0, -0.5 * s, 0.01 * s)).scale = Vector3(1.0, 1.3, 1.0)
+		var foot := MK.skinned(hip, MK.sphere_mesh(0.17 * s), skin, Vector3(0, -0.68 * s, 0.06 * s))
+		foot.scale = Vector3(1.1, 0.5, 1.5)
+
+	# --- torso: heavy slab, hunched forward, broad at the shoulders ---
+	var torso := Node3D.new()
+	torso.position = Vector3(0, 0.72 * s, 0)
+	torso.rotation.x = deg_to_rad(13)
+	add_child(torso)
+	var gut := MK.skinned(torso, MK.sphere_mesh(0.36 * s, 24, 12), skin, Vector3(0, 0.16 * s, 0))
+	gut.scale = Vector3(1.15, 1.05, 0.85)
+	var chest := MK.skinned(torso, MK.sphere_mesh(0.42 * s, 24, 12), skin, Vector3(0, 0.5 * s, 0))
+	chest.scale = Vector3(1.35, 1.0, 0.9)
+
+	# --- rime: pale crust clinging to the upper surfaces ---
+	if detail:
+		for i in randi_range(7, 12):
+			var dir := Vector3(randf_range(-1.0, 1.0), randf_range(0.0, 1.0), randf_range(-1.0, 1.0)).normalized()
+			var on := Vector3(0, 0.42 * s, 0) + Vector3(dir.x * 1.3, dir.y * 1.0, dir.z * 0.88) * 0.4 * s
+			var crust := MK.skinned(torso, MK.sphere_mesh(randf_range(0.05, 0.1) * s), ice, on)
+			crust.scale = Vector3(1.0, 0.45, 1.0)
+
+	# --- ice shards off the back and shoulders ---
+	for i in randi_range(4, 7):
+		var side := 1.0 if i % 2 == 0 else -1.0
+		var shard := MK.skinned(torso, MK.cone_mesh(randf_range(0.05, 0.09) * s, randf_range(0.3, 0.55) * s), ice,
+			Vector3(side * randf_range(0.1, 0.45) * s, randf_range(0.35, 0.72) * s, -0.28 * s))
+		shard.rotation.x = deg_to_rad(randf_range(-42, -18))
+		shard.rotation.z = deg_to_rad(-side * randf_range(10, 34))
+
+	# --- arms: long and heavy, hanging low ---
+	for side in [-1.0, 1.0]:
+		var sh := Node3D.new()
+		sh.position = Vector3(side * 0.5 * s, 0.56 * s, 0)
+		sh.rotation.x = deg_to_rad(-14)
+		sh.rotation.z = deg_to_rad(-side * 9.0)
+		torso.add_child(sh)
+		MK.skinned(sh, MK.sphere_mesh(0.15 * s, 20, 10), skin, Vector3(0, -0.2 * s, 0)).scale = Vector3(1.0, 1.7, 1.0)
+		MK.skinned(sh, MK.sphere_mesh(0.13 * s), skin, Vector3(0, -0.56 * s, 0.03 * s)).scale = Vector3(1.0, 1.5, 1.0)
+		MK.skinned(sh, MK.sphere_mesh(0.15 * s), skin, Vector3(0, -0.82 * s, 0.04 * s))
+		# icicles hanging off the forearm
+		if detail:
+			for k in 3:
+				var ic := MK.skinned(sh, MK.cone_mesh(0.028 * s, randf_range(0.12, 0.22) * s), ice,
+					Vector3(side * 0.09 * s, -0.6 * s + float(k) * 0.09 * s, 0))
+				ic.rotation.x = deg_to_rad(180)
+
+	# --- head: sunk between the shoulders, brow heavy with ice ---
+	var head := Node3D.new()
+	head.position = Vector3(0, 0.86 * s, 0.04 * s)
+	head.rotation.x = deg_to_rad(-13)
+	torso.add_child(head)
+	var hr := 0.26 * s
+	var skull := MK.skinned(head, MK.sphere_mesh(hr, 24, 12), skin, Vector3.ZERO)
+	skull.scale = Vector3(1.0, 1.05, 1.05)
+	# A ridge over the eyes, not a cap on the crown — sat forward and low, or it
+	# reads as a hat perched on a blue lump.
+	# Hide-coloured, not ice: a white disc across the face reads as a visor no
+	# matter where it sits. The rime on top of it does the "frozen" work instead.
+	var brow := MK.skinned(head, MK.sphere_mesh(0.19 * s), skin, Vector3(0, 0.06 * s, hr * 0.46))
+	brow.scale = Vector3(1.2, 0.42, 0.72)
+	if detail:
+		for i in 3:
+			var frost_bit := MK.skinned(head, MK.sphere_mesh(randf_range(0.03, 0.055) * s), ice,
+				Vector3((float(i) - 1.0) * 0.09 * s, 0.15 * s, hr * 0.36))
+			frost_bit.scale = Vector3(1.0, 0.5, 1.0)
+	# eyes: glowing slits set deep under that ridge, proud of the skull surface
+	for side in [-1.0, 1.0]:
+		var ex: float = side * 0.11 * s
+		var eye := MK.add_mesh(head, MK.sphere_mesh(0.062 * s), eye_c, Vector3(ex, -0.03 * s, hr * 0.92), true, 5.0)
+		eye.scale = Vector3(1.6, 0.7, 1.0)
+	# jaw crusted with frozen teeth
+	var jaw := MK.skinned(head, MK.sphere_mesh(0.19 * s), skin, Vector3(0, -0.17 * s, hr * 0.5))
+	jaw.scale = Vector3(1.05, 0.6, 0.9)
+	if detail:
+		for i in 4:
+			var tx := (float(i) - 1.5) * 0.06 * s
+			var fang := MK.skinned(head, MK.cone_mesh(0.022 * s, 0.09 * s), ice, Vector3(tx, -0.11 * s, hr * 0.95))
+			fang.rotation.x = deg_to_rad(180)
+
+## The grey ones: the classic abductor build — spindly limbs, no bulk anywhere,
+## and a cranium far too big for the body, so the whole silhouette is top-heavy.
+## Waxy rather than wet: same low roughness as the others but no mottling.
+func _build_grey() -> void:
+	body_scale *= randf_range(0.92, 1.1)
+	var s: float = body_scale
+	var detail := not OS.has_feature("web")
+
+	var hides := [
+		Color(0.60, 0.64, 0.68), Color(0.66, 0.68, 0.66),
+		Color(0.55, 0.60, 0.66), Color(0.70, 0.72, 0.70),
+	]
+	var hide: Color = hides[randi() % hides.size()]
+	var eye_c := Color(0.4, 0.88, 1.0)
+
+	# no texture: their whole look is smooth, featureless and slightly waxy
+	var skin := MK.oily_mat(hide, null, null, 1.0, 0.32)
+	var eye_mat := MK.oily_mat(Color(0.03, 0.03, 0.05), null, null, 1.0, 0.04)
+	_mats.append(skin)
+
+	# --- legs: thin, slightly bowed ---
+	for side in [-1.0, 1.0]:
+		var hip := Node3D.new()
+		hip.position = Vector3(side * 0.11 * s, 0.78 * s, 0)
+		add_child(hip)
+		_legs.append(hip)
+		MK.skinned(hip, MK.sphere_mesh(0.07 * s), skin, Vector3(0, -0.2 * s, 0)).scale = Vector3(1.0, 2.8, 1.0)
+		MK.skinned(hip, MK.sphere_mesh(0.055 * s), skin, Vector3(0, -0.56 * s, 0.01 * s)).scale = Vector3(1.0, 2.6, 1.0)
+		var foot := MK.skinned(hip, MK.sphere_mesh(0.07 * s), skin, Vector3(0, -0.76 * s, 0.04 * s))
+		foot.scale = Vector3(0.9, 0.5, 1.6)
+
+	# --- torso: narrow, slight ribcage taper, no mass ---
+	var torso := Node3D.new()
+	torso.position = Vector3(0, 0.78 * s, 0)
+	torso.rotation.x = deg_to_rad(5)
+	add_child(torso)
+	var belly := MK.skinned(torso, MK.sphere_mesh(0.15 * s, 20, 10), skin, Vector3(0, 0.1 * s, 0))
+	belly.scale = Vector3(1.15, 1.35, 0.8)
+	var chest := MK.skinned(torso, MK.sphere_mesh(0.17 * s, 20, 10), skin, Vector3(0, 0.36 * s, 0))
+	chest.scale = Vector3(1.3, 1.2, 0.78)
+
+	# --- arms: very long, reaching past the knee ---
+	for side in [-1.0, 1.0]:
+		var sh := Node3D.new()
+		sh.position = Vector3(side * 0.19 * s, 0.44 * s, 0)
+		sh.rotation.x = deg_to_rad(-10)
+		sh.rotation.z = deg_to_rad(-side * 7.0)
+		torso.add_child(sh)
+		MK.skinned(sh, MK.sphere_mesh(0.055 * s), skin, Vector3(0, -0.2 * s, 0)).scale = Vector3(1.0, 3.2, 1.0)
+		MK.skinned(sh, MK.sphere_mesh(0.045 * s), skin, Vector3(0, -0.58 * s, 0.02 * s)).scale = Vector3(1.0, 3.0, 1.0)
+		var hand := Node3D.new()
+		hand.position = Vector3(0, -0.82 * s, 0.02 * s)
+		sh.add_child(hand)
+		MK.skinned(hand, MK.sphere_mesh(0.05 * s), skin, Vector3.ZERO).scale = Vector3(0.8, 1.1, 0.5)
+		# three long fingers
+		if detail:
+			for f in 3:
+				var fin := MK.skinned(hand, MK.sphere_mesh(0.018 * s), skin,
+					Vector3((float(f) - 1.0) * 0.035 * s, -0.09 * s, 0))
+				fin.scale = Vector3(1.0, 3.4, 1.0)
+
+	# --- head: the whole point. Huge swollen cranium on a thin neck. ---
+	MK.skinned(torso, MK.sphere_mesh(0.045 * s), skin, Vector3(0, 0.54 * s, 0)).scale = Vector3(1.0, 1.8, 1.0)
+	var head := Node3D.new()
+	head.position = Vector3(0, 0.78 * s, 0.01 * s)
+	head.rotation.x = deg_to_rad(-5)
+	torso.add_child(head)
+	var hr := 0.26 * s
+	var skull := MK.skinned(head, MK.sphere_mesh(hr, 24, 12), skin, Vector3.ZERO)
+	# wide and tall at the back, tapering to a small chin
+	skull.scale = Vector3(1.12, 1.15, 1.0)
+	var jaw := MK.skinned(head, MK.sphere_mesh(0.17 * s, 20, 10), skin, Vector3(0, -0.19 * s, 0.05 * s))
+	jaw.scale = Vector3(0.85, 0.9, 0.9)
+
+	# --- eyes: enormous black almonds, wrapped around the front of the skull ---
+	for side in [-1.0, 1.0]:
+		var ex: float = side * 0.13 * s
+		var eye := MK.skinned(head, MK.sphere_mesh(0.12 * s, 20, 10), eye_mat,
+			Vector3(ex, -0.02 * s, hr * 0.78))
+		eye.scale = Vector3(1.25, 0.8, 0.7)
+		# tilted inward and down: the angle is what makes them read as almonds
+		eye.rotation.z = deg_to_rad(side * 26.0)
+		# faint wet catchlight so they aren't flat black voids
+		if detail:
+			MK.add_mesh(head, MK.sphere_mesh(0.02 * s), eye_c,
+				Vector3(ex + side * 0.03 * s, 0.03 * s, hr * 0.95), true, 1.6)
+	# vestigial nostrils and a thin mouth line
+	if detail:
+		for side in [-1.0, 1.0]:
+			MK.add_mesh(head, MK.sphere_mesh(0.012 * s), hide.darkened(0.45),
+				Vector3(side * 0.025 * s, -0.14 * s, hr * 0.83))
+	var mouth := MK.add_mesh(head, MK.sphere_mesh(0.05 * s), hide.darkened(0.5),
+		Vector3(0, -0.23 * s, hr * 0.66))
+	mouth.scale = Vector3(1.5, 0.22, 0.5)
 
 ## A proper dragon: serpentine neck, horned skull, membrane wings with finger
 ## struts, four clawed legs, spined back and a long spade-tipped tail.
