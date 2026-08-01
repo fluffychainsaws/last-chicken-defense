@@ -33,9 +33,31 @@ var ui: CanvasLayer
 var player: CharacterBody3D
 var env: Environment
 var sun: DirectionalLight3D
+var moonlight: DirectionalLight3D
 var moon: MeshInstance3D
 var moon_mat: StandardMaterial3D
 var fence_mat: StandardMaterial3D
+var window_mat: StandardMaterial3D
+var _ground_tex: NoiseTexture2D
+var _ground_norm: NoiseTexture2D
+var _wood_tex: NoiseTexture2D
+var _wood_norm: NoiseTexture2D
+var _plaster_tex: NoiseTexture2D
+
+const GRASS_SHADER := "
+shader_type spatial;
+render_mode cull_disabled, specular_disabled;
+void vertex() {
+	vec3 wpos = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+	float w = 1.0 - UV.y;
+	VERTEX.x += sin(TIME * 1.7 + wpos.x * 0.6 + wpos.z * 0.8) * 0.07 * w;
+	VERTEX.z += cos(TIME * 1.3 + wpos.x * 0.9) * 0.04 * w;
+}
+void fragment() {
+	ALBEDO = COLOR.rgb;
+	ROUGHNESS = 1.0;
+}
+"
 
 var chickens: Array = []
 var enemies: Array = []
@@ -116,49 +138,92 @@ func _setup_input() -> void:
 
 func _build_environment() -> void:
 	env = Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.5, 0.7, 0.9)
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.8, 0.87, 0.95)
-	env.ambient_light_energy = 1.0
+	var sky_mat := PhysicalSkyMaterial.new()
+	sky_mat.sun_disk_scale = 3.0
+	var sky := Sky.new()
+	sky.sky_material = sky_mat
+	env.background_mode = Environment.BG_SKY
+	env.sky = sky
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.tonemap_mode = Environment.TONE_MAPPER_AGX
+	env.tonemap_exposure = 1.3
+	env.glow_enabled = true
+	env.glow_intensity = 0.5
+	env.glow_bloom = 0.05
+	env.ssao_enabled = true
+	env.ssao_intensity = 1.6
+	env.ssil_enabled = true
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.7, 0.8, 0.9)
-	env.fog_density = 0.0008
+	env.fog_density = 0.0006
+	env.fog_aerial_perspective = 0.7
+	env.fog_sky_affect = 0.0
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 	sun = DirectionalLight3D.new()
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 120.0
+	sun.light_angular_distance = 0.4
+	sun.directional_shadow_max_distance = 150.0
+	sun.directional_shadow_blend_splits = true
 	add_child(sun)
+	moonlight = DirectionalLight3D.new()
+	moonlight.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+	moonlight.rotation = Vector3(-1.0, 2.6, 0)
+	moonlight.light_color = Color(0.5, 0.62, 1.0)
+	moonlight.light_energy = 0.0
+	moonlight.light_angular_distance = 1.5
+	moonlight.shadow_enabled = true
+	add_child(moonlight)
 	moon = MK.sphere(self, 5.0, Color(0.93, 0.9, 0.82), Vector3(70, 55, -90), true, 2.0)
 	moon_mat = moon.material_override
 	moon.visible = false
 
 func _build_world() -> void:
-	# ground
-	MK.static_box(self, Vector3(240, 1, 240), Vector3(0, -0.5, 0), Color(0.32, 0.52, 0.25))
+	_ground_tex = MK.noise_tex(11, 0.06, 5, false, 0.55)
+	_ground_norm = MK.noise_tex(12, 0.09, 4, true)
+	_wood_tex = MK.noise_tex(21, 0.05, 3, false, 0.6)
+	_wood_norm = MK.noise_tex(21, 0.05, 3, true)
+	_plaster_tex = MK.noise_tex(31, 0.15, 5, false, 0.78)
+	# ground: invisible collider + textured plane
+	MK.static_box(self, Vector3(240, 1, 240), Vector3(0, -0.5, 0))
+	var gp := PlaneMesh.new()
+	gp.size = Vector2(240, 240)
+	var gmi := MeshInstance3D.new()
+	gmi.mesh = gp
+	gmi.material_override = MK.tex_mat(Color(0.4, 0.58, 0.3), _ground_tex, 70.0, 1.0, _ground_norm)
+	add_child(gmi)
 	# dirt in the chicken run + path to the gate
-	MK.box(self, Vector3(12, 0.04, 10), Color(0.5, 0.38, 0.24), Vector3(22, 0.02, -1))
-	MK.box(self, Vector3(2.2, 0.04, 16), Color(0.62, 0.55, 0.4), Vector3(0, 0.02, 12))
+	var dirt := MK.box(self, Vector3(12, 0.04, 10), Color.WHITE, Vector3(22, 0.02, -1))
+	dirt.material_override = MK.tex_mat(Color(0.8, 0.62, 0.4), _ground_tex, 6.0, 1.0, _ground_norm)
+	var path := MK.box(self, Vector3(2.2, 0.04, 16), Color.WHITE, Vector3(0, 0.02, 12))
+	path.material_override = MK.tex_mat(Color(0.9, 0.82, 0.62), _ground_tex, 3.0, 1.0, _ground_norm)
 	_build_house()
 	_build_coop()
 	_build_run_fence()
 	_build_perimeter_fence()
 	_build_forest()
+	_build_grass()
 
 func _build_house() -> void:
 	var hx := -20.0
 	var hz := -12.0
-	MK.box(self, Vector3(12, 0.06, 10), Color(0.45, 0.35, 0.28), Vector3(hx, 0.03, hz))
-	var wall_c := Color(0.78, 0.72, 0.6)
-	MK.static_box(self, Vector3(0.3, 3.2, 10.3), Vector3(hx - 6, 1.6, hz), wall_c)
-	MK.static_box(self, Vector3(0.3, 3.2, 4.3), Vector3(hx + 6, 1.6, hz - 2.85), wall_c)
-	MK.static_box(self, Vector3(0.3, 3.2, 4.3), Vector3(hx + 6, 1.6, hz + 2.85), wall_c)
-	MK.static_box(self, Vector3(12.3, 3.2, 0.3), Vector3(hx, 1.6, hz - 5), wall_c)
-	MK.static_box(self, Vector3(12.3, 3.2, 0.3), Vector3(hx, 1.6, hz + 5), wall_c)
-	MK.box(self, Vector3(13.4, 0.3, 11.4), Color(0.35, 0.22, 0.16), Vector3(hx, 3.5, hz))
-	MK.box(self, Vector3(13.4, 0.5, 2.0), Color(0.35, 0.22, 0.16), Vector3(hx, 3.8, hz))
+	var wall_m := MK.tex_mat(Color(0.95, 0.88, 0.75), _plaster_tex, 2.0, 0.85)
+	var roof_m := MK.tex_mat(Color(0.5, 0.32, 0.22), _wood_tex, 3.0, 0.95, _wood_norm)
+	var floor_m := MK.tex_mat(Color(0.7, 0.52, 0.38), _wood_tex, 4.0, 0.9, _wood_norm)
+	MK.box(self, Vector3(12, 0.06, 10), Color.WHITE, Vector3(hx, 0.03, hz)).material_override = floor_m
+	_tex_wall(Vector3(0.3, 3.2, 10.3), Vector3(hx - 6, 1.6, hz), wall_m)
+	_tex_wall(Vector3(0.3, 3.2, 4.3), Vector3(hx + 6, 1.6, hz - 2.85), wall_m)
+	_tex_wall(Vector3(0.3, 3.2, 4.3), Vector3(hx + 6, 1.6, hz + 2.85), wall_m)
+	_tex_wall(Vector3(12.3, 3.2, 0.3), Vector3(hx, 1.6, hz - 5), wall_m)
+	_tex_wall(Vector3(12.3, 3.2, 0.3), Vector3(hx, 1.6, hz + 5), wall_m)
+	MK.box(self, Vector3(13.4, 0.3, 11.4), Color.WHITE, Vector3(hx, 3.5, hz)).material_override = roof_m
+	MK.box(self, Vector3(13.4, 0.5, 2.0), Color.WHITE, Vector3(hx, 3.8, hz)).material_override = roof_m
+	# warm windows facing the yard (glow at night)
+	window_mat = MK.mat(Color(1.0, 0.85, 0.5), true, 0.15)
+	for wx in [hx - 3.0, hx + 3.0]:
+		var w := MK.box(self, Vector3(1.1, 1.0, 0.1), Color.WHITE, Vector3(wx, 1.8, hz + 5.13))
+		w.material_override = window_mat
+		MK.box(self, Vector3(1.3, 0.12, 0.14), Color(0.4, 0.3, 0.2), Vector3(wx, 1.24, hz + 5.13))
 	# desk + computer
 	MK.static_box(self, Vector3(1.0, 0.9, 2.2), Vector3(hx - 4.6, 0.45, hz), Color(0.5, 0.36, 0.2))
 	MK.box(self, Vector3(0.12, 0.6, 0.9), Color(0.12, 0.12, 0.14), Vector3(hx - 4.8, 1.35, hz))
@@ -171,11 +236,18 @@ func _build_house() -> void:
 	add_child(lamp)
 
 func _build_coop() -> void:
-	MK.static_box(self, Vector3(3.6, 2.6, 3.2), Vector3(20, 1.3, -12), Color(0.62, 0.24, 0.18))
-	var roof := MK.box(self, Vector3(4.4, 0.2, 4.0), Color(0.32, 0.2, 0.13), Vector3(20, 2.85, -12))
+	var coop_m := MK.tex_mat(Color(0.95, 0.38, 0.28), _wood_tex, 2.5, 0.95, _wood_norm)
+	var roof_m := MK.tex_mat(Color(0.45, 0.3, 0.2), _wood_tex, 3.0, 0.95, _wood_norm)
+	_tex_wall(Vector3(3.6, 2.6, 3.2), Vector3(20, 1.3, -12), coop_m)
+	var roof := MK.box(self, Vector3(4.4, 0.2, 4.0), Color.WHITE, Vector3(20, 2.85, -12))
+	roof.material_override = roof_m
 	roof.rotation.z = 0.14
 	MK.box(self, Vector3(0.06, 1.3, 0.95), Color(0.08, 0.06, 0.05), Vector3(18.18, 0.65, -12))
 	MK.box(self, Vector3(0.06, 0.45, 1.5), Color(0.9, 0.88, 0.8), Vector3(18.15, 1.95, -12))
+
+func _tex_wall(size: Vector3, pos: Vector3, m: Material) -> void:
+	MK.static_box(self, size, pos)
+	MK.box(self, size, Color.WHITE, pos).material_override = m
 
 func _build_run_fence() -> void:
 	var wire := Color(0.75, 0.75, 0.78, 0.4)
@@ -186,7 +258,7 @@ func _build_run_fence() -> void:
 	MK.box(self, Vector3(0.06, 1.1, 3.6), wire, Vector3(16, 0.55, 2.2))
 
 func _build_perimeter_fence() -> void:
-	fence_mat = MK.mat(Color(0.55, 0.4, 0.24))
+	fence_mat = MK.tex_mat(Color(0.85, 0.62, 0.38), _wood_tex, 1.5, 0.95, _wood_norm)
 	var group := Node3D.new()
 	add_child(group)
 	# posts
@@ -223,19 +295,36 @@ func _build_perimeter_fence() -> void:
 	MK.static_box(self, Vector3(27.0 - GATE_HALF, 1.4, 0.3), Vector3((YARD.max_x + GATE_HALF) / 2.0, 0.7, YARD.max_z))
 
 func _build_forest() -> void:
+	var bark_m := MK.tex_mat(Color(0.6, 0.44, 0.28), _wood_tex, 1.2, 1.0, _wood_norm)
 	var placed := 0
-	while placed < 120:
-		var x := randf_range(-110.0, 110.0)
-		var z := randf_range(-110.0, 110.0)
+	while placed < 130:
+		var x := randf_range(-115.0, 115.0)
+		var z := randf_range(-115.0, 115.0)
 		if absf(x) < 38.0 and absf(z) < 28.0:
 			continue
 		var tree := Node3D.new()
 		tree.position = Vector3(x, 0, z)
+		tree.rotation.y = randf() * TAU
+		var s := randf_range(0.75, 1.7)
+		tree.scale = Vector3(s, s * randf_range(0.9, 1.3), s)
 		add_child(tree)
-		var g := Color(0.16 + randf() * 0.1, 0.4 + randf() * 0.15, 0.16)
-		MK.cyl(tree, 0.22, 0.34, 1.8, Color(0.4, 0.28, 0.16), Vector3(0, 0.9, 0))
-		MK.cyl(tree, 0.0, 1.6, 2.4, g, Vector3(0, 2.7, 0))
-		MK.cyl(tree, 0.0, 1.1, 1.9, g.lightened(0.06), Vector3(0, 4.1, 0))
+		var far := Vector3(x, 0, z).length() > 65.0
+		var g := Color(0.18 + randf() * 0.12, 0.42 + randf() * 0.2, 0.13 + randf() * 0.1)
+		var canopy: Array = []
+		var trunk := MK.cyl(tree, 0.2, 0.36, 2.2, Color.WHITE, Vector3(0, 1.1, 0))
+		trunk.material_override = bark_m
+		canopy.append(trunk)
+		if randf() < 0.62:
+			for i in 3:
+				canopy.append(MK.cyl(tree, 0.0, 1.95 - 0.5 * float(i), 2.0, g.darkened(0.05 * float(i)), Vector3(randf_range(-0.12, 0.12), 2.3 + 1.2 * float(i), randf_range(-0.12, 0.12))))
+		else:
+			for i in 3:
+				var blob := MK.sphere(tree, randf_range(0.9, 1.5), g, Vector3(randf_range(-0.8, 0.8), randf_range(2.6, 3.7), randf_range(-0.8, 0.8)))
+				blob.scale.y = 0.82
+				canopy.append(blob)
+		if far:
+			for c in canopy:
+				c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if Vector3(x, 0, z).length() < 60.0:
 			tree_spots.append(Vector3(x, 0, z))
 		placed += 1
@@ -252,6 +341,47 @@ func _build_forest() -> void:
 		if absf(rx) < 32.0 and absf(rz) < 22.0:
 			continue
 		MK.sphere(self, randf_range(0.3, 0.7), Color(0.5, 0.5, 0.52), Vector3(rx, 0.15, rz))
+
+func _build_grass() -> void:
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.06, 0.42)
+	var sh := Shader.new()
+	sh.code = GRASS_SHADER
+	var smat := ShaderMaterial.new()
+	smat.shader = sh
+	quad.material = smat
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = quad
+	var count := 42000
+	mm.instance_count = count
+	var idx := 0
+	while idx < count:
+		var x := randf_range(-62.0, 62.0)
+		var z := randf_range(-62.0, 62.0)
+		if Vector2(x, z).length() > 62.0:
+			continue
+		if absf(x - 22.0) < 6.5 and absf(z + 1.0) < 5.5:
+			continue  # dirt run
+		if absf(x) < 1.4 and z > 3.0 and z < 20.5:
+			continue  # path
+		if absf(x + 20.0) < 6.8 and absf(z + 12.0) < 5.8:
+			continue  # house
+		if absf(x - 20.0) < 2.5 and absf(z + 12.0) < 2.2:
+			continue  # coop
+		var tall := randf_range(0.5, 0.9) if in_yard(x, z) else randf_range(0.8, 1.4)
+		var basis := Basis(Vector3.UP, randf() * TAU)
+		basis = basis.rotated(Vector3.RIGHT, randf_range(-0.12, 0.12))
+		basis = basis.scaled(Vector3(1, tall, 1))
+		mm.set_instance_transform(idx, Transform3D(basis, Vector3(x, 0.21 * tall, z)))
+		var r := randf()
+		mm.set_instance_color(idx, Color(0.2 + r * 0.08, 0.42 + r * 0.14, 0.12 + r * 0.05))
+		idx += 1
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mmi)
 
 func _build_turret() -> void:
 	if turret_node != null:
@@ -782,27 +912,32 @@ func close_market() -> void:
 func _update_environment() -> void:
 	if is_night:
 		var boss: bool = night_theme.get("boss", false)
-		env.background_color = Color(0.1, 0.02, 0.04) if boss else Color(0.03, 0.04, 0.1)
-		env.ambient_light_color = Color(0.3, 0.12, 0.15) if boss else Color(0.15, 0.19, 0.3)
-		env.ambient_light_energy = 0.55
-		env.fog_density = 0.010
-		env.fog_light_color = Color(0.1, 0.02, 0.03) if boss else Color(0.02, 0.03, 0.08)
-		sun.light_energy = 0.22
-		sun.light_color = Color(0.6, 0.7, 1.0)
-		sun.rotation = Vector3(-1.1, 0.5, 0)
+		sun.light_energy = 0.0
+		sun.rotation = Vector3(0.5, 0.4, 0)  # below horizon -> physical sky goes dark
+		moonlight.light_energy = 0.5
+		moonlight.light_color = Color(1.0, 0.4, 0.32) if boss else Color(0.5, 0.62, 1.0)
+		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		env.ambient_light_color = Color(0.28, 0.1, 0.12) if boss else Color(0.12, 0.15, 0.25)
+		env.ambient_light_energy = 0.5
+		env.fog_enabled = false
+		env.volumetric_fog_enabled = true
+		env.volumetric_fog_density = 0.028 if boss else 0.012
+		env.volumetric_fog_albedo = Color(0.55, 0.15, 0.15) if boss else Color(0.35, 0.45, 0.7)
 	else:
-		var ang := lerpf(0.1, 0.9, phase_t) * PI
+		var ang := lerpf(0.10, 0.90, phase_t) * PI
 		var elev := sin(ang)
-		var day_sky := Color(0.5, 0.7, 0.9)
-		var dusk_sky := Color(0.85, 0.48, 0.29)
-		env.background_color = dusk_sky.lerp(day_sky, clampf(elev * 1.6, 0.0, 1.0))
-		env.ambient_light_color = Color(0.8, 0.87, 0.95)
-		env.ambient_light_energy = lerpf(0.5, 1.0, clampf(elev * 1.5, 0.0, 1.0))
-		env.fog_density = 0.0008
-		env.fog_light_color = env.background_color
-		sun.light_energy = maxf(0.15, elev * 1.3)
-		sun.light_color = Color(1.0, lerpf(0.6, 0.95, elev), lerpf(0.4, 0.9, elev))
-		sun.rotation = Vector3(-ang, 0.5, 0)
+		var warm := clampf(elev * 2.0, 0.0, 1.0)
+		sun.rotation = Vector3(-ang, 0.4, 0)
+		sun.light_energy = maxf(0.3, elev) * 1.55
+		sun.light_color = Color(1.0, lerpf(0.55, 0.98, warm), lerpf(0.3, 0.95, warm))
+		moonlight.light_energy = 0.0
+		env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+		env.ambient_light_energy = lerpf(0.6, 1.0, elev)
+		env.volumetric_fog_enabled = false
+		env.fog_enabled = true
+		env.fog_density = 0.0006
+	if window_mat != null:
+		window_mat.emission_energy_multiplier = 2.2 if is_night else 0.15
 
 func clock_text() -> String:
 	var minutes: int
@@ -877,6 +1012,7 @@ func _load_game() -> void:
 
 func _run_shot_test(dir: String) -> void:
 	start_new()
+	phase_t = 0.35  # mid-morning light for the day shot
 	await get_tree().create_timer(2.0).timeout
 	# regression check: synthetic mouse motion must rotate the camera
 	var rot_before: float = player.rotation.y

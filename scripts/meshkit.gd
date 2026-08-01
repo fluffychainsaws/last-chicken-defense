@@ -45,6 +45,40 @@ static func capsule(parent: Node3D, r: float, h: float, color: Color, pos: Vecto
 	m.height = h
 	return add_mesh(parent, m, color, pos)
 
+## Seamless procedural noise texture (albedo or normal map). No image assets needed.
+static func noise_tex(noise_seed: int, freq: float, octaves := 4, as_normal := false, floor_v := 0.0) -> NoiseTexture2D:
+	var n := FastNoiseLite.new()
+	n.seed = noise_seed
+	n.frequency = freq
+	n.fractal_octaves = octaves
+	var t := NoiseTexture2D.new()
+	t.noise = n
+	t.width = 256
+	t.height = 256
+	t.seamless = true
+	if as_normal:
+		t.as_normal_map = true
+		t.bump_strength = 6.0
+	elif floor_v > 0.0:
+		# compress contrast so the texture is subtle variation, not black blotches
+		var g := Gradient.new()
+		g.set_color(0, Color(floor_v, floor_v, floor_v))
+		g.set_color(1, Color.WHITE)
+		t.color_ramp = g
+	return t
+
+## Textured PBR material: noise albedo multiplied by tint color, optional normal map.
+static func tex_mat(color: Color, tex: Texture2D, uv_scale: float, rough := 0.95, normal: Texture2D = null) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = color
+	m.albedo_texture = tex
+	m.roughness = rough
+	m.uv1_scale = Vector3(uv_scale, uv_scale, uv_scale)
+	if normal != null:
+		m.normal_enabled = true
+		m.normal_texture = normal
+	return m
+
 ## Invisible (or colored) static collider box.
 static func static_box(parent: Node3D, size: Vector3, pos: Vector3, color = null) -> StaticBody3D:
 	var sb := StaticBody3D.new()
