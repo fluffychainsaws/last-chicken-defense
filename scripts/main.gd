@@ -878,6 +878,13 @@ func _load_game() -> void:
 func _run_shot_test(dir: String) -> void:
 	start_new()
 	await get_tree().create_timer(2.0).timeout
+	# regression check: synthetic mouse motion must rotate the camera
+	var rot_before: float = player.rotation.y
+	var ev := InputEventMouseMotion.new()
+	ev.relative = Vector2(200, 0)
+	Input.parse_input_event(ev)
+	await get_tree().process_frame
+	print("TEST mouselook: %s" % ("OK" if absf(player.rotation.y - rot_before) > 0.01 else "FAILED"))
 	await _shot(dir + "/day.png")
 	player.rotation.y = PI  # face the gate
 	phase_t = 1.0

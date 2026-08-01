@@ -30,6 +30,7 @@ func setup(g: Node3D) -> void:
 	_build_market()
 	_overlay = Control.new()
 	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_overlay)
 
 func _label(parent: Node, text: String, size: int, color := Color.WHITE) -> Label:
@@ -262,7 +263,14 @@ func _build_market() -> void:
 	style.content_margin_top = 12
 	style.content_margin_bottom = 12
 	_market_panel.add_theme_stylebox_override("panel", style)
-	_market_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_market_panel.anchor_left = 0.5
+	_market_panel.anchor_right = 0.5
+	_market_panel.anchor_top = 0.5
+	_market_panel.anchor_bottom = 0.5
+	_market_panel.offset_left = -380
+	_market_panel.offset_right = 380
+	_market_panel.offset_top = -280
+	_market_panel.offset_bottom = 280
 	_market_panel.custom_minimum_size = Vector2(760, 560)
 	_market_panel.visible = false
 	add_child(_market_panel)
@@ -350,8 +358,14 @@ func _overlay_panel() -> VBoxContainer:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_overlay.add_child(bg)
 	var box := VBoxContainer.new()
-	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.custom_minimum_size = Vector2(700, 0)
+	box.anchor_left = 0.5
+	box.anchor_right = 0.5
+	box.anchor_top = 0.5
+	box.anchor_bottom = 0.5
+	box.offset_left = -350
+	box.offset_right = 350
+	box.offset_top = -280
+	box.offset_bottom = 280
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_theme_constant_override("separation", 10)
 	_overlay.add_child(box)
