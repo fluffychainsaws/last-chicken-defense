@@ -40,6 +40,8 @@ var _burn_t := 0.0
 var _anim_t := 0.0
 var _target_chicken = null
 var _wings: Array = []
+var _legs: Array = []
+var _stride := 0.0
 var _mats: Array = []
 
 func setup(g: Node3D, night: int, thm: Dictionary, escort := false) -> void:
@@ -65,6 +67,12 @@ func setup(g: Node3D, night: int, thm: Dictionary, escort := false) -> void:
 	_build_mesh()
 
 func _build_mesh() -> void:
+	if theme.get("id", "") == "goblin":
+		_build_goblin()
+		return
+	if theme.get("id", "") == "dragon":
+		_build_dragon()
+		return
 	var s: float = body_scale
 	var body_c: Color = theme["body"]
 	var eye_c: Color = theme["eye"]
@@ -87,12 +95,305 @@ func _build_mesh() -> void:
 			var w := MK.box(self, Vector3(1.8 * s, 0.06 * s, 0.7 * s), body_c.darkened(0.2), Vector3(side * 1.1 * s, 1.5 * s, -0.2 * s))
 			_wings.append(w)
 
+## A goblin: hunched, big-eared, grinning, armed with whatever it found.
+## Size, skin, gear and headwear all vary per individual.
+func _build_goblin() -> void:
+	body_scale *= randf_range(0.85, 1.3)
+	var s: float = body_scale
+	# bigger goblins lumber, runts scurry
+	spd *= lerpf(1.15, 0.82, clampf((s / theme["scale"] - 0.85) / 0.45, 0.0, 1.0))
+	var skins := [
+		Color(0.42, 0.60, 0.24), Color(0.34, 0.52, 0.22), Color(0.52, 0.66, 0.30),
+		Color(0.26, 0.47, 0.29), Color(0.28, 0.55, 0.55),
+	]
+	var skin: Color = skins[randi() % skins.size()]
+	var leather := Color(0.26, 0.21, 0.16)
+	var metal := Color(0.38, 0.38, 0.42)
+	var eye_c: Color = Color(1.0, 0.45, 0.06) if randf() < 0.7 else Color(1.0, 0.2, 0.12)
+
+	# --- legs: hip-pivoted, bandy, big flat feet ---
+	for side in [-1.0, 1.0]:
+		var hip := Node3D.new()
+		hip.position = Vector3(side * 0.17 * s, 0.6 * s, 0)
+		add_child(hip)
+		_legs.append(hip)
+		MK.capsule(hip, 0.1 * s, 0.34 * s, skin.darkened(0.1), Vector3(0, -0.18 * s, 0))
+		MK.capsule(hip, 0.08 * s, 0.28 * s, skin, Vector3(0, -0.45 * s, 0.02 * s))
+		MK.box(hip, Vector3(0.19 * s, 0.07 * s, 0.3 * s), skin.darkened(0.2), Vector3(0, -0.585 * s, 0.06 * s))
+	# loincloth / tattered kilt
+	MK.cyl(self, 0.24 * s, 0.3 * s, 0.3 * s, leather, Vector3(0, 0.66 * s, 0))
+
+	# --- hunched torso ---
+	var torso := Node3D.new()
+	torso.position = Vector3(0, 0.78 * s, 0)
+	torso.rotation.x = deg_to_rad(16)  # the hunch
+	add_child(torso)
+	var chest := MK.capsule(torso, 0.28 * s, 0.5 * s, skin, Vector3(0, 0.2 * s, 0))
+	chest.scale = Vector3(1.15, 1.0, 0.85)
+	_mats.append(chest.material_override)
+	# scavenged breastplate + belt + shoulder pauldrons
+	var plate := MK.box(torso, Vector3(0.44 * s, 0.36 * s, 0.3 * s), metal, Vector3(0, 0.22 * s, 0.06 * s))
+	_mats.append(plate.material_override)
+	MK.box(torso, Vector3(0.52 * s, 0.09 * s, 0.34 * s), leather, Vector3(0, -0.04 * s, 0.02 * s))
+	MK.box(torso, Vector3(0.1 * s, 0.1 * s, 0.36 * s), Color(0.55, 0.45, 0.2), Vector3(0, -0.04 * s, 0.06 * s))
+	for side in [-1.0, 1.0]:
+		var pauldron := MK.sphere(torso, 0.17 * s, metal.darkened(0.15), Vector3(side * 0.32 * s, 0.36 * s, 0))
+		pauldron.scale = Vector3(1.0, 0.7, 1.0)
+
+	# --- arms: long, hanging forward ---
+	var hands := []
+	for side in [-1.0, 1.0]:
+		var sh := Node3D.new()
+		sh.position = Vector3(side * 0.3 * s, 0.34 * s, 0)
+		sh.rotation.x = deg_to_rad(-28)
+		sh.rotation.z = deg_to_rad(-side * 12.0)
+		torso.add_child(sh)
+		MK.capsule(sh, 0.085 * s, 0.34 * s, skin, Vector3(0, -0.19 * s, 0))
+		MK.capsule(sh, 0.075 * s, 0.3 * s, skin.lightened(0.04), Vector3(0, -0.46 * s, 0.05 * s))
+		var hand := Node3D.new()
+		hand.position = Vector3(0, -0.64 * s, 0.08 * s)
+		sh.add_child(hand)
+		MK.sphere(hand, 0.09 * s, skin.darkened(0.08), Vector3.ZERO)
+		hands.append(hand)
+	_goblin_weapon(hands[1], s, metal)
+	if randf() < 0.35:
+		_goblin_weapon(hands[0], s, metal)
+
+	# --- head: oversized, wide grin, glowing eyes ---
+	var head := Node3D.new()
+	head.position = Vector3(0, 0.62 * s, 0.06 * s)
+	head.rotation.x = deg_to_rad(-16)  # counter the hunch so it looks forward
+	torso.add_child(head)
+	var skull := MK.sphere(head, 0.27 * s, skin, Vector3.ZERO)
+	skull.scale = Vector3(0.95, 1.0, 1.05)
+	_mats.append(skull.material_override)
+	# jaw
+	var jaw := MK.box(head, Vector3(0.3 * s, 0.16 * s, 0.24 * s), skin.darkened(0.06), Vector3(0, -0.18 * s, 0.09 * s))
+	# huge pointed ears
+	for side in [-1.0, 1.0]:
+		var ear := MK.cyl(head, 0.0, 0.09 * s, 0.5 * s, skin.lightened(0.06), Vector3(side * 0.3 * s, 0.1 * s, -0.02 * s))
+		ear.rotation.z = deg_to_rad(-side * 58.0)
+		ear.rotation.x = deg_to_rad(-18)
+		ear.scale = Vector3(1.0, 1.0, 0.45)
+	# brow ridge -> permanent scowl
+	for side in [-1.0, 1.0]:
+		var brow := MK.box(head, Vector3(0.14 * s, 0.05 * s, 0.08 * s), skin.darkened(0.28), Vector3(side * 0.11 * s, 0.11 * s, 0.2 * s))
+		brow.rotation.z = deg_to_rad(side * 16.0)
+	# glowing eyes, deep-set
+	for side in [-1.0, 1.0]:
+		MK.sphere(head, 0.052 * s, eye_c, Vector3(side * 0.11 * s, 0.04 * s, 0.21 * s), true, 3.5)
+		MK.sphere(head, 0.02 * s, Color(0.05, 0.02, 0.02), Vector3(side * 0.11 * s, 0.04 * s, 0.255 * s))
+	# long hooked nose
+	var nose := MK.cyl(head, 0.0, 0.055 * s, 0.2 * s, skin.darkened(0.05), Vector3(0, -0.03 * s, 0.26 * s))
+	nose.rotation.x = deg_to_rad(108)
+	# wide grin full of teeth
+	MK.box(head, Vector3(0.26 * s, 0.075 * s, 0.06 * s), Color(0.12, 0.05, 0.06), Vector3(0, -0.145 * s, 0.21 * s))
+	for i in 5:
+		var tx := (float(i) - 2.0) * 0.052 * s
+		var up := i % 2 == 0
+		var tooth := MK.cyl(head, 0.0, 0.021 * s, 0.075 * s, Color(0.94, 0.92, 0.82), Vector3(tx, -0.15 * s + (0.02 * s if up else -0.02 * s), 0.225 * s))
+		tooth.rotation.x = deg_to_rad(180 if up else 0)
+	# headwear: pointed hood, scrap helm, or wild hair
+	var roll := randf()
+	if roll < 0.3:
+		var hat := MK.cyl(head, 0.0, 0.24 * s, 0.42 * s, Color(0.55, 0.15, 0.14), Vector3(0, 0.26 * s, -0.02 * s))
+		hat.rotation.x = deg_to_rad(-16)
+	elif roll < 0.55:
+		var helm := MK.sphere(head, 0.28 * s, metal.darkened(0.1), Vector3(0, 0.06 * s, 0))
+		helm.scale = Vector3(1.0, 0.62, 1.0)
+	elif roll < 0.8:
+		var hair_c := Color(0.72, 0.28, 0.08) if randf() < 0.6 else Color(0.15, 0.12, 0.1)
+		for i in 6:
+			var tuft := MK.cyl(head, 0.0, 0.035 * s, randf_range(0.14, 0.26) * s, hair_c, Vector3(randf_range(-0.1, 0.1) * s, 0.24 * s, randf_range(-0.12, 0.04) * s))
+			tuft.rotation.x = randf_range(-0.5, 0.2)
+			tuft.rotation.z = randf_range(-0.5, 0.5)
+
+## A proper dragon: serpentine neck, horned skull, membrane wings with finger
+## struts, four clawed legs, spined back and a long spade-tipped tail.
+func _build_dragon() -> void:
+	var s: float = body_scale
+	var schemes := [
+		[Color(0.62, 0.11, 0.08), Color(0.88, 0.52, 0.14)],  # crimson / gold belly
+		[Color(0.3, 0.09, 0.36), Color(0.62, 0.3, 0.7)],     # violet / orchid
+		[Color(0.16, 0.16, 0.2), Color(0.55, 0.5, 0.35)],    # obsidian / bronze
+	]
+	var scheme: Array = schemes[randi() % schemes.size()]
+	var hide: Color = scheme[0]
+	var belly: Color = scheme[1]
+	var horn := Color(0.22, 0.19, 0.2)
+	var membrane: Color = hide.darkened(0.25)
+	var eye_c: Color = Color(1.0, 0.78, 0.12)
+
+	# --- barrel body ---
+	var body := MK.sphere(self, 0.62 * s, hide, Vector3(0, 1.35 * s, 0))
+	body.scale = Vector3(0.92, 0.86, 1.5)
+	_mats.append(body.material_override)
+	var chest := MK.sphere(self, 0.5 * s, hide, Vector3(0, 1.4 * s, 0.62 * s))
+	chest.scale = Vector3(0.95, 0.9, 1.05)
+	_mats.append(chest.material_override)
+	# plated belly
+	for i in 5:
+		var bp := MK.box(self, Vector3(0.42 * s, 0.05 * s, 0.22 * s), belly, Vector3(0, 0.85 * s, (float(i) - 2.0) * 0.28 * s))
+		bp.rotation.x = deg_to_rad(3)
+
+	# --- serpentine neck: segments curving up and forward ---
+	var neck_pts := []
+	for i in 5:
+		var t := float(i) / 4.0
+		var p := Vector3(0, 1.55 * s + t * 0.95 * s, 0.95 * s + t * 0.95 * s)
+		neck_pts.append(p)
+		var seg := MK.sphere(self, lerpf(0.34, 0.19, t) * s, hide, p)
+		seg.scale = Vector3(0.9, 0.9, 1.2)
+		if i == 0:
+			_mats.append(seg.material_override)
+		# throat plates
+		MK.box(self, Vector3(0.2 * s, 0.04 * s, 0.14 * s), belly, p + Vector3(0, -lerpf(0.28, 0.16, t) * s, 0.04 * s))
+
+	# --- head ---
+	var head := Node3D.new()
+	head.position = Vector3(0, 2.55 * s, 1.98 * s)
+	head.rotation.x = deg_to_rad(-14)
+	add_child(head)
+	var skull := MK.sphere(head, 0.24 * s, hide, Vector3.ZERO)
+	skull.scale = Vector3(0.85, 0.85, 1.15)
+	_mats.append(skull.material_override)
+	# snout + lower jaw
+	var snout := MK.box(head, Vector3(0.24 * s, 0.17 * s, 0.44 * s), hide, Vector3(0, -0.04 * s, 0.32 * s))
+	snout.rotation.x = deg_to_rad(4)
+	MK.box(head, Vector3(0.21 * s, 0.09 * s, 0.4 * s), hide.darkened(0.12), Vector3(0, -0.16 * s, 0.3 * s))
+	MK.sphere(head, 0.03 * s, Color(0.1, 0.06, 0.06), Vector3(0.07 * s, 0.02 * s, 0.53 * s))
+	MK.sphere(head, 0.03 * s, Color(0.1, 0.06, 0.06), Vector3(-0.07 * s, 0.02 * s, 0.53 * s))
+	# fangs
+	for i in 4:
+		var fx := (0.075 if i % 2 == 0 else -0.075) * s
+		var fz := (0.28 + float(i / 2) * 0.14) * s
+		var fang := MK.cyl(head, 0.0, 0.028 * s, 0.13 * s, Color(0.95, 0.93, 0.85), Vector3(fx, -0.13 * s, fz))
+		fang.rotation.x = deg_to_rad(180)
+	# swept-back horns
+	for side in [-1.0, 1.0]:
+		var h1 := MK.cyl(head, 0.0, 0.06 * s, 0.62 * s, horn, Vector3(side * 0.15 * s, 0.18 * s, -0.22 * s))
+		h1.rotation.x = deg_to_rad(52)
+		h1.rotation.z = deg_to_rad(-side * 20.0)
+		var h2 := MK.cyl(head, 0.0, 0.04 * s, 0.34 * s, horn.lightened(0.1), Vector3(side * 0.2 * s, 0.02 * s, -0.16 * s))
+		h2.rotation.x = deg_to_rad(68)
+		h2.rotation.z = deg_to_rad(-side * 42.0)
+		# jaw frill spikes
+		var jf := MK.cyl(head, 0.0, 0.03 * s, 0.2 * s, horn, Vector3(side * 0.19 * s, -0.1 * s, 0.02 * s))
+		jf.rotation.z = deg_to_rad(-side * 65.0)
+	# slit glowing eyes under a heavy brow
+	for side in [-1.0, 1.0]:
+		MK.sphere(head, 0.06 * s, eye_c, Vector3(side * 0.14 * s, 0.06 * s, 0.16 * s), true, 4.0)
+		var pupil := MK.box(head, Vector3(0.012 * s, 0.07 * s, 0.02 * s), Color(0.06, 0.03, 0.02), Vector3(side * 0.14 * s, 0.06 * s, 0.215 * s))
+		var brow := MK.box(head, Vector3(0.14 * s, 0.05 * s, 0.16 * s), hide.darkened(0.3), Vector3(side * 0.14 * s, 0.14 * s, 0.14 * s))
+		brow.rotation.z = deg_to_rad(side * 12.0)
+
+	# --- wings: shoulder pivots so the flap animation drives them ---
+	for side in [-1.0, 1.0]:
+		var wing := Node3D.new()
+		wing.position = Vector3(side * 0.5 * s, 1.75 * s, 0.25 * s)
+		add_child(wing)
+		_wings.append(wing)
+		# arm bone out to the wrist
+		var arm := MK.capsule(wing, 0.08 * s, 1.0 * s, hide.darkened(0.1), Vector3(side * 0.5 * s, 0.18 * s, 0))
+		arm.rotation.z = deg_to_rad(side * 78.0)
+		arm.rotation.x = deg_to_rad(-8)
+		# finger struts fanning back, with membrane panels between them
+		var spread := [10.0, 34.0, 58.0, 82.0]
+		for i in spread.size():
+			var fl := lerpf(2.5, 1.5, float(i) / 3.0) * s
+			var finger := MK.capsule(wing, 0.045 * s, fl, horn.lightened(0.05), Vector3.ZERO)
+			finger.rotation.y = deg_to_rad(-side * spread[i])
+			finger.rotation.z = deg_to_rad(side * 86.0)
+			finger.position = Vector3(side * (0.95 + cos(deg_to_rad(spread[i])) * fl * 0.5) * s, 0.2 * s, -sin(deg_to_rad(spread[i])) * fl * 0.5 * s)
+			if i > 0:
+				var prev: float = spread[i - 1]
+				var cur: float = spread[i]
+				var mid: float = (prev + cur) * 0.5
+				var ml := lerpf(2.4, 1.6, float(i) / 3.0) * s
+				var panel := MK.box(wing, Vector3(ml * 1.05, 0.035 * s, ml * 0.95), membrane, Vector3.ZERO)
+				panel.rotation.y = deg_to_rad(-side * mid)
+				panel.rotation.z = deg_to_rad(side * 9.0)  # slight dihedral so it catches light
+				panel.position = Vector3(side * (0.95 + cos(deg_to_rad(mid)) * ml * 0.45) * s, 0.2 * s, -sin(deg_to_rad(mid)) * ml * 0.45 * s)
+		# leading-edge claw
+		MK.cyl(wing, 0.0, 0.05 * s, 0.24 * s, horn, Vector3(side * 1.0 * s, 0.34 * s, 0.1 * s)).rotation.x = deg_to_rad(-30)
+
+	# --- four clawed legs ---
+	for pair in [[0.62, 0.42, 0.62], [-0.7, 0.5, 0.72]]:
+		var lz: float = pair[0]
+		var lx: float = pair[1]
+		var thick: float = pair[2]
+		for side in [-1.0, 1.0]:
+			var hipn := Node3D.new()
+			hipn.position = Vector3(side * lx * s, 1.05 * s, lz * s)
+			add_child(hipn)
+			_legs.append(hipn)
+			MK.capsule(hipn, 0.16 * thick * s, 0.5 * s, hide, Vector3(side * 0.06 * s, -0.24 * s, 0))
+			MK.capsule(hipn, 0.12 * thick * s, 0.46 * s, hide.darkened(0.08), Vector3(side * 0.1 * s, -0.7 * s, -0.04 * s))
+			MK.box(hipn, Vector3(0.28 * s, 0.1 * s, 0.4 * s), hide.darkened(0.15), Vector3(side * 0.1 * s, -0.98 * s, 0.1 * s))
+			for c in 3:
+				var claw := MK.cyl(hipn, 0.0, 0.035 * s, 0.18 * s, horn.lightened(0.15), Vector3(side * 0.1 * s + (float(c) - 1.0) * 0.09 * s, -1.0 * s, 0.3 * s))
+				claw.rotation.x = deg_to_rad(115)
+
+	# --- tail: tapering segments with a spade tip ---
+	var tail_n := 8
+	for i in tail_n:
+		var t := float(i) / float(tail_n - 1)
+		var tz := -0.85 * s - t * 2.6 * s
+		var ty := 1.3 * s - t * t * 0.75 * s
+		var seg := MK.sphere(self, lerpf(0.4, 0.09, t) * s, hide, Vector3(0, ty, tz))
+		seg.scale = Vector3(0.9, 0.9, 1.25)
+		if i == tail_n - 1:
+			var spade := MK.cyl(self, 0.0, 0.22 * s, 0.5 * s, membrane, Vector3(0, ty - 0.02 * s, tz - 0.3 * s))
+			spade.rotation.x = deg_to_rad(-84)
+			spade.scale = Vector3(1.0, 1.0, 0.35)
+
+	# --- dorsal spines from skull to tail tip ---
+	for i in 16:
+		var t := float(i) / 15.0
+		var sz: float
+		var sy: float
+		if t < 0.45:
+			var u := t / 0.45
+			sz = 1.9 * s - u * 1.05 * s
+			sy = 2.4 * s - u * 0.55 * s
+		else:
+			var u2 := (t - 0.45) / 0.55
+			sz = 0.85 * s - u2 * 3.4 * s
+			sy = 1.85 * s - u2 * u2 * 0.72 * s
+		var spike := MK.cyl(self, 0.0, lerpf(0.075, 0.03, absf(t - 0.35) * 1.4) * s, lerpf(0.34, 0.12, t) * s, horn.lightened(0.08), Vector3(0, sy, sz))
+		spike.rotation.x = deg_to_rad(-18)
+
+## Crude scavenged weapon in the given hand.
+func _goblin_weapon(hand: Node3D, s: float, metal: Color) -> void:
+	var wood := Color(0.34, 0.24, 0.15)
+	match randi() % 4:
+		0:  # notched cleaver
+			MK.cyl(hand, 0.022 * s, 0.022 * s, 0.24 * s, wood, Vector3(0, -0.08 * s, 0))
+			var blade := MK.box(hand, Vector3(0.045 * s, 0.5 * s, 0.13 * s), metal.lightened(0.2), Vector3(0, -0.42 * s, 0.02 * s))
+			blade.rotation.x = deg_to_rad(-8)
+		1:  # spear
+			MK.cyl(hand, 0.02 * s, 0.024 * s, 1.15 * s, wood, Vector3(0, -0.3 * s, 0.1 * s)).rotation.x = deg_to_rad(24)
+			var tip := MK.cyl(hand, 0.0, 0.05 * s, 0.24 * s, metal.lightened(0.25), Vector3(0, -0.78 * s, 0.42 * s))
+			tip.rotation.x = deg_to_rad(204)
+		2:  # hand axe
+			MK.cyl(hand, 0.022 * s, 0.026 * s, 0.36 * s, wood, Vector3(0, -0.14 * s, 0))
+			var head_a := MK.box(hand, Vector3(0.07 * s, 0.19 * s, 0.2 * s), metal, Vector3(0.02 * s, -0.3 * s, 0.06 * s))
+			head_a.rotation.x = deg_to_rad(-12)
+		3:  # rusty dagger
+			MK.cyl(hand, 0.02 * s, 0.02 * s, 0.13 * s, leather_col(), Vector3(0, -0.05 * s, 0))
+			MK.box(hand, Vector3(0.03 * s, 0.3 * s, 0.09 * s), metal.lightened(0.1), Vector3(0, -0.26 * s, 0.01 * s))
+
+func leather_col() -> Color:
+	return Color(0.26, 0.21, 0.16)
+
 func tick(delta: float) -> void:
 	_anim_t += delta
 	_atk_cd -= delta
 	for i in _wings.size():
 		_wings[i].rotation.z = sin(_anim_t * 9.0) * 0.5 * (1 if i == 0 else -1)
 	match state:
+		"pose":
+			return  # test-only: hold still for a portrait
 		"burn":
 			_burn_t -= delta
 			scale = Vector3.ONE * maxf(0.01, _burn_t / 1.2)
@@ -177,6 +478,12 @@ func _move(dir: Vector3, speed: float, delta: float) -> void:
 	position += dir * speed * delta
 	if dir.length() > 0.01:
 		rotation.y = atan2(dir.x, dir.z)
+	# walkers with jointed legs stride; everything else keeps the simple bob
+	if not _legs.is_empty() and not flying:
+		_stride += delta * speed * 3.4
+		var swing := sin(_stride) * 0.5
+		for i in _legs.size():
+			_legs[i].rotation.x = swing * (1.0 if i % 2 == 0 else -1.0)
 
 func ignite() -> void:
 	if state == "burn":

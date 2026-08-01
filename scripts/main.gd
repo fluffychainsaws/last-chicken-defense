@@ -4,6 +4,7 @@ extends Node3D
 
 const MK = preload("res://scripts/meshkit.gd")
 const ChickenScript = preload("res://scripts/chicken.gd")
+const RoosterScript = preload("res://scripts/rooster.gd")
 const EnemyScript = preload("res://scripts/enemy.gd")
 const PlayerScript = preload("res://scripts/player.gd")
 const UIScript = preload("res://scripts/game_ui.gd")
@@ -60,6 +61,7 @@ void fragment() {
 "
 
 var chickens: Array = []
+var roosters: Array = []
 var enemies: Array = []
 var projectiles: Array = []
 var particles: Array = []
@@ -82,6 +84,8 @@ var night_theme := {}
 var coop_pos := Vector3(20, 0, -12)
 var coop_door := Vector3(17.6, 0, -12)
 var computer_pos := Vector3(-24.2, 1.0, -12)
+var bed_pos := Vector3(-16.6, 0.0, -14.6)
+var sleeping := false
 var turret_node: Node3D = null
 var _turret_cd := 0.0
 
@@ -224,6 +228,15 @@ func _build_house() -> void:
 		var w := MK.box(self, Vector3(1.1, 1.0, 0.1), Color.WHITE, Vector3(wx, 1.8, hz + 5.13))
 		w.material_override = window_mat
 		MK.box(self, Vector3(1.3, 0.12, 0.14), Color(0.4, 0.3, 0.2), Vector3(wx, 1.24, hz + 5.13))
+	# bed: sleep here to skip to nightfall
+	bed_pos = Vector3(hx + 3.4, 0.0, hz - 2.6)
+	var frame_m := MK.tex_mat(Color(0.55, 0.36, 0.2), _wood_tex, 2.0, 0.9, _wood_norm)
+	MK.static_box(self, Vector3(1.9, 0.45, 2.9), bed_pos + Vector3(0, 0.22, 0))
+	MK.box(self, Vector3(1.9, 0.45, 2.9), Color.WHITE, bed_pos + Vector3(0, 0.22, 0)).material_override = frame_m
+	MK.box(self, Vector3(1.8, 0.22, 2.7), Color(0.75, 0.3, 0.28), bed_pos + Vector3(0, 0.55, 0))
+	MK.box(self, Vector3(1.8, 0.06, 1.0), Color(0.9, 0.88, 0.85), bed_pos + Vector3(0, 0.67, 0.85))
+	MK.box(self, Vector3(0.9, 0.16, 0.45), Color(0.95, 0.94, 0.9), bed_pos + Vector3(0, 0.72, -1.05))
+	MK.box(self, Vector3(2.0, 0.9, 0.12), Color.WHITE, bed_pos + Vector3(0, 0.6, -1.45)).material_override = frame_m
 	# desk + computer
 	MK.static_box(self, Vector3(1.0, 0.9, 2.2), Vector3(hx - 4.6, 0.45, hz), Color(0.5, 0.36, 0.2))
 	MK.box(self, Vector3(0.12, 0.6, 0.9), Color(0.12, 0.12, 0.14), Vector3(hx - 4.8, 1.35, hz))
@@ -457,6 +470,8 @@ func _process(delta: float) -> void:
 	_update_environment()
 	for c in chickens.duplicate():
 		c.tick(delta)
+	for r in roosters.duplicate():
+		r.tick(delta)
 	for e in enemies.duplicate():
 		e.tick(delta)
 	_update_projectiles(delta)
@@ -497,6 +512,10 @@ func _start_night() -> void:
 	ui.night_fx(true, boss)
 	ui.announce(night_theme.name, "NIGHT %d  -  %s" % [day_num, night_theme.sub], true)
 	sfx.play("horn")
+	# the rooster calls the alarm as the light dies
+	if roosters.size() > 0:
+		await get_tree().create_timer(1.1).timeout
+		sfx.crow(-7.0)
 	_whisper_t = 8.0
 
 func _start_dawn() -> void:
@@ -506,6 +525,8 @@ func _start_dawn() -> void:
 		e.ignite()
 	moon.visible = false
 	ui.night_fx(false)
+	if roosters.size() > 0:
+		sfx.crow(-5.0)
 	var laid := 0
 	for c in chickens:
 		c.day_mode()
@@ -515,9 +536,11 @@ func _start_dawn() -> void:
 			egg_mesh.scale.y = 1.3
 			egg_pickups.append(egg_mesh)
 	var hatched := 0
-	if upgrades.rooster:
+	if roosters.size() > 0:
+		# more roosters = better fertility, with diminishing returns
+		var rate := 0.12 + 0.05 * float(roosters.size() - 1)
 		for c in chickens.duplicate():
-			if not c.is_chick and chickens.size() + hatched < MAX_CHICKENS and randf() < 0.12:
+			if not c.is_chick and chickens.size() + hatched < MAX_CHICKENS and randf() < rate:
 				hatched += 1
 	for i in hatched:
 		_spawn_chicken(coop_door + Vector3(randf_range(-2, 0), 0, randf_range(-2, 2)), true)
@@ -741,6 +764,15 @@ func _spawn_chicken(pos: Vector3, chick: bool) -> void:
 	c.setup(self, pos, chick)
 	chickens.append(c)
 
+func _spawn_rooster(pos: Vector3) -> void:
+	var r = RoosterScript.new()
+	add_child(r)
+	r.setup(self, pos)
+	# stagger perches along the coop ridge so multiple roosters don't overlap
+	var i := roosters.size()
+	r.perch = Vector3(20.0 + (float(i) - 0.5) * 1.1, 3.15, -12.0)
+	roosters.append(r)
+
 func chicken_died(c: Node3D) -> void:
 	if not chickens.has(c):
 		return
@@ -832,10 +864,34 @@ func sell_eggs() -> void:
 	ui.refresh()
 	ui.market_refresh()
 
+## How many roosters the flock is allowed: 1 per 10 hens.
+func rooster_cap() -> int:
+	return hen_count() / 10
+
+func hen_count() -> int:
+	var n := 0
+	for c in chickens:
+		if not c.is_chick:
+			n += 1
+	return n
+
+func _rooster_listing() -> Dictionary:
+	var cap := rooster_cap()
+	var have := roosters.size()
+	var base := {"id": "rooster", "name": "AYAM CEMANI ROOSTER", "price": 60 + 90 * have, "owned": false}
+	if have >= cap:
+		var needed := (have + 1) * 10 - hen_count()
+		base.name += "  [LOCKED]"
+		base.desc = "all-black, iridescent, deeply serious. one rooster per 10 hens - you need %d more hen%s." % [needed, "" if needed == 1 else "s"]
+		base.owned = true  # renders as unavailable
+	else:
+		base.desc = "all-black, iridescent, deeply serious. enables breeding, and roosts on the Armory at night to divebomb intruders.  (%d/%d owned)" % [have, cap]
+	return base
+
 func market_items() -> Array:
 	var items := [
 		{"id": "hen", "name": "LIVE HEN", "desc": "+1 hen, delivered instantly by drone. do not ask about the drone.", "price": 35, "owned": chickens.size() >= MAX_CHICKENS},
-		{"id": "rooster", "name": "ROOSTER", "desc": "enables breeding. every dawn each hen has a chance to hatch a chick.", "price": 60, "owned": upgrades.rooster},
+		_rooster_listing(),
 		{"id": "feed5", "name": "CHICKEN FEED x5", "desc": "throw it. a chicken will come eat it and heal 30 hp.", "price": 12, "owned": false},
 		{"id": "shotgun", "name": "PUMP SHOTGUN", "desc": "the farmer's argument. includes 8 shells.", "price": 150, "owned": upgrades.shotgun},
 		{"id": "shells8", "name": "SHELLS x8", "desc": "arguments, refilled.", "price": 20, "owned": false},
@@ -865,6 +921,10 @@ func buy(id: String) -> void:
 				return
 			_spawn_chicken(rand_in_yard(), false)
 		"rooster":
+			if roosters.size() >= rooster_cap():
+				sfx.play("denied")
+				return
+			_spawn_rooster(rand_in_yard())
 			upgrades.rooster = true
 		"feed5":
 			feed += 5
@@ -892,6 +952,22 @@ func buy(id: String) -> void:
 	sfx.play("buy")
 	ui.refresh()
 	ui.market_refresh()
+
+## Sleep until nightfall. Costs the rest of the day's foraging income, so it's
+## a real choice: rest early and go in prepared, or squeeze the daylight.
+func sleep_until_night() -> void:
+	if sleeping or is_night or over:
+		return
+	sleeping = true
+	player.hp = minf(player.max_hp, player.hp + 25.0)
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	ui.set_prompt(null)
+	await ui.fade_to_black(1.1)
+	phase_t = 0.999
+	await get_tree().create_timer(0.7).timeout
+	await ui.fade_from_black(1.4)
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	sleeping = false
 
 func open_market() -> void:
 	if over:
@@ -976,7 +1052,7 @@ func _save_game() -> void:
 		hens += 1
 	var data := {
 		"coins": coins, "day": day_num, "eggs": eggs, "feed": feed, "shells": shells,
-		"hens": hens, "coop_hp": coop_hp, "upgrades": upgrades,
+		"hens": hens, "roosters": roosters.size(), "coop_hp": coop_hp, "upgrades": upgrades,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	f.store_string(JSON.stringify(data))
@@ -1007,6 +1083,8 @@ func _load_game() -> void:
 	var hens := int(data.get("hens", 10))
 	for i in maxi(hens, 1):
 		_spawn_chicken(rand_in_yard(), false)
+	for i in int(data.get("roosters", 1 if upgrades.rooster else 0)):
+		_spawn_rooster(rand_in_yard())
 
 # ---------------- automated screenshot test ----------------
 
@@ -1026,12 +1104,124 @@ func _run_shot_test(dir: String) -> void:
 	Input.parse_input_event(ev)
 	await get_tree().process_frame
 	print("TEST mouselook: %s" % ("OK" if absf(player.rotation.y - rot_before) > 0.01 else "FAILED"))
+	# walk cycle: a moving chicken's legs must actually swing
+	var walker = chickens[9]
+	walker.state = "wander"
+	walker.position = Vector3(-6, 0, 6)
+	walker._target = Vector3(6, 0, 6)
+	walker._timer = 9.0
+	var leg_swing := 0.0
+	for i in 30:
+		walker.tick(0.05)
+		leg_swing = maxf(leg_swing, absf(walker._legs[0].rotation.x))
+	print("TEST walkcycle: %s (max swing %.2f rad)" % ["OK" if leg_swing > 0.15 else "FAILED", leg_swing])
+	# rooster gate: 10 hens -> cap 1
+	print("TEST rooster_cap(10 hens): %s (cap=%d)" % ["OK" if rooster_cap() == 1 else "FAILED", rooster_cap()])
+	_spawn_rooster(Vector3(-8, 0, 4))
+	var roo = roosters[0]
+	# with 10 hens and 1 rooster owned, the listing must now read LOCKED
+	var listing := _rooster_listing()
+	print("TEST rooster gate at cap: %s" % ["OK" if listing.owned and "LOCKED" in listing.name else "FAILED"])
+	# 11th hen still isn't enough; the 20th unlocks rooster #2
+	for i in 10:
+		_spawn_chicken(rand_in_yard(), false)
+	print("TEST rooster unlock at 20 hens: %s (cap=%d)" % ["OK" if not _rooster_listing().owned and rooster_cap() == 2 else "FAILED", rooster_cap()])
+	print("TEST audio loaded: cluck=%s crow=%s shotgun=%s" % [sfx._streams.has("real_cluck"), sfx._streams.has("real_crow"), sfx._streams["shot"] is AudioStreamMP3])
+	# rate limiter: from a clear cooldown, 20 rapid cluck() calls must fire exactly once
+	sfx._cluck_cd = 0.0
+	var played := 0
+	for i in 20:
+		var before: float = sfx._cluck_cd
+		sfx.cluck()
+		if sfx._cluck_cd > before:
+			played += 1
+	print("TEST cluck ratelimit: %s (%d/20 fired)" % ["OK" if played == 1 else "FAILED", played])
 	await _shot(dir + "/day.png")
+	# bed: sleeping carries the clock all the way to nightfall
 	player.rotation.y = PI  # face the gate
-	phase_t = 1.0
-	await get_tree().create_timer(6.0).timeout
+	var was_night := is_night
+	sleep_until_night()
+	await get_tree().create_timer(4.0).timeout
+	print("TEST bed sleep: %s (night %s -> %s)" % ["OK" if is_night and not was_night else "FAILED", was_night, is_night])
+	# ...and is refused once it's dark
+	var t_before := phase_t
+	sleep_until_night()
+	print("TEST bed blocked at night: %s" % ["OK" if is_equal_approx(phase_t, t_before) and not sleeping else "FAILED"])
+	await get_tree().create_timer(4.0).timeout
 	await _shot(dir + "/night.png")
+	# freeze the wave so the yard stays empty for a deterministic check
+	_spawn_left = 0
+	var kept = enemies[0] if enemies.size() > 0 else null
+	for e in enemies.duplicate():
+		if e != kept:
+			enemies.erase(e)
+			e.queue_free()
+	if kept != null:
+		kept.position = Vector3(0, 0, 300)
+	for i in 60:
+		roo.tick(0.05)
+	print("TEST rooster perch: %s (state=%s, y=%.2f)" % ["OK" if roo.state == "perch" and roo.position.y > 3.0 else "FAILED", roo.state, roo.position.y])
+	# bring it back near the coop: he must launch off the roof and land a hit
+	if kept != null:
+		kept.position = coop_pos + Vector3(3, 0, 0)
+		kept.entered = true
+		var hp_before: float = kept.hp
+		for i in 40:
+			roo.tick(0.05)
+		print("TEST rooster swoop: %s (state=%s, enemy hp %.0f -> %.0f)" % ["OK" if roo.state == "swoop" and kept.hp < hp_before else "FAILED", roo.state, hp_before, kept.hp])
+	# pose the rooster for his portrait
+	player.position = Vector3(-9.5, 0.1, 5)
+	player.rotation.y = 0.0
+	player.cam.rotation.x = -0.1
+	roo.state = "strut"
+	roo.position = Vector3(-9.5, 0, 2.4)  # in front of the camera (-Z)
+	roo.rotation.y = deg_to_rad(48)       # three-quarter view
+	phase_t = 0.4
+	is_night = false
+	moon.visible = false
+	_update_environment()
+	await get_tree().create_timer(0.4).timeout
+	await _shot(dir + "/rooster.png")
+	await _portrait(dir + "/goblins.png", "goblin", 5, 3.4)
+	await _portrait(dir + "/dragon.png", "dragon", 1, 19.0)
 	get_tree().quit()
+
+## Spawn a lineup of one enemy type in daylight and photograph it.
+func _portrait(path: String, theme_id: String, count: int, dist: float) -> void:
+	for e in enemies.duplicate():
+		enemies.erase(e)
+		e.queue_free()
+	var thm := {}
+	for t in EnemyScript.THEMES:
+		if t.id == theme_id:
+			thm = t
+	# the camera looks down -Z, so the lineup goes in front at negative z
+	for i in count:
+		var e = EnemyScript.new()
+		add_child(e)
+		e.setup(self, 6, thm, false)
+		var spread := (float(i) - float(count - 1) * 0.5)
+		e.position = Vector3(spread * 1.6, 0, -dist - absf(spread) * 0.8)
+		# +Z faces the camera; the dragon turns for a three-quarter wing view
+		e.rotation.y = deg_to_rad(52) if theme_id == "dragon" else spread * 0.14
+		e.state = "pose"
+		enemies.append(e)
+	# clear the flock out of frame
+	for c in chickens:
+		c.position = Vector3(26, 0, -2)
+		c.state = "carried"
+	for r in roosters:
+		r.position = Vector3(26, 0, 2)
+		r.state = "perch"
+	player.position = Vector3(0, 0.1, 0)
+	player.rotation.y = 0.0
+	player.cam.rotation.x = -0.12 if theme_id == "goblin" else 0.02
+	is_night = false
+	moon.visible = false
+	phase_t = 0.4
+	_update_environment()
+	await get_tree().create_timer(0.5).timeout
+	await _shot(path)
 
 func _shot(path: String) -> void:
 	await RenderingServer.frame_post_draw

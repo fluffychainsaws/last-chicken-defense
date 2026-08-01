@@ -22,6 +22,9 @@ var _eat_pile = null
 var _head: Node3D
 var _body_mat: StandardMaterial3D
 var _helmet: MeshInstance3D = null
+var _legs: Array = []
+var _stride := 0.0
+var _head_base_z := 0.22
 
 func setup(g: Node3D, pos: Vector3, chick: bool) -> void:
 	game = g
@@ -48,10 +51,14 @@ func _build_mesh() -> void:
 	var body_col: Color = pal[0].lightened(randf() * 0.08)
 	var accent: Color = pal[1]
 	var leg_col := Color(0.9, 0.62, 0.2)
-	# scrawny legs + big feet
+	# scrawny legs + big feet, pivoting from the hip so they can stride
 	for side in [-1.0, 1.0]:
-		MK.cyl(self, 0.022, 0.022, 0.32, leg_col, Vector3(side * 0.07, 0.16, 0))
-		MK.box(self, Vector3(0.09, 0.02, 0.13), leg_col, Vector3(side * 0.07, 0.01, 0.04))
+		var hip := Node3D.new()
+		hip.position = Vector3(side * 0.07, 0.32, 0)
+		add_child(hip)
+		_legs.append(hip)
+		MK.cyl(hip, 0.022, 0.022, 0.32, leg_col, Vector3(0, -0.16, 0))
+		MK.box(hip, Vector3(0.09, 0.02, 0.13), leg_col, Vector3(0, -0.31, 0.04))
 	# body (smaller, higher = ganglier)
 	var body := MK.sphere(self, 0.27, body_col, Vector3(0, 0.5, 0))
 	body.scale = Vector3(0.85, 0.95, 1.05)
@@ -73,7 +80,8 @@ func _build_mesh() -> void:
 	neck.rotation.x = deg_to_rad(-12)
 	# head
 	_head = Node3D.new()
-	_head.position = Vector3(0, 0.8 + neck_h, 0.22)
+	_head_base_z = 0.22
+	_head.position = Vector3(0, 0.8 + neck_h, _head_base_z)
 	add_child(_head)
 	MK.sphere(_head, 0.12, body_col, Vector3.ZERO)
 	# giant mismatched googly eyes with wandering pupils
@@ -123,8 +131,8 @@ func tick(delta: float) -> void:
 			if _timer <= 0.0:
 				_target = game.rand_in_yard()
 				_timer = randf_range(2.0, 5.0)
-				if randf() < 0.25:
-					game.sfx.play("cluck" if randf() < 0.5 else "cluck2", -14.0)
+				if randf() < 0.3:
+					game.sfx.cluck(-15.0)
 			_walk_toward(_target, 1.6, delta)
 			_head.rotation.x = maxf(0.0, sin(_peck_t * 3.0)) * 0.9
 		"eat":
@@ -141,7 +149,7 @@ func tick(delta: float) -> void:
 					game.consume_feed_pile(_eat_pile)
 					_eat_pile = null
 					state = "wander"
-					game.sfx.play("cluck", -8.0)
+					game.sfx.cluck(-10.0)
 		"forage_go":
 			if _walk_toward(_tree, 2.2, delta):
 				state = "forage_work"
@@ -173,14 +181,14 @@ func tick(delta: float) -> void:
 				if _attack_cd <= 0.0 and position.distance_to(enemy.position) < 1.6:
 					_attack_cd = 0.8
 					enemy.damage(4.0)
-					game.sfx.play("cluck2", -6.0)
+					game.sfx.cluck(-8.0)
 			else:
 				_walk_toward(game.coop_door + Vector3(randf_range(-2, 2), 0, randf_range(-2, 2)), 1.8, delta)
 		"panic":
 			if _timer <= 0.0:
 				_target = game.rand_in_yard()
 				_timer = randf_range(0.5, 1.2)
-				game.sfx.play("cluck", -6.0)
+				game.sfx.cluck(-6.0)
 			_walk_toward(_target, 4.2, delta)
 
 func start_forage() -> void:
@@ -219,12 +227,34 @@ func _walk_toward(dest: Vector3, speed: float, delta: float) -> bool:
 	var flat := Vector3(dest.x, 0, dest.z)
 	var d := flat - Vector3(position.x, 0, position.z)
 	if d.length() < 0.35:
+		_settle_legs(delta)
 		return true
 	var dir := d.normalized()
 	position += dir * speed * delta
-	position.y = absf(sin(_peck_t * 9.0)) * 0.05
 	rotation.y = atan2(dir.x, dir.z)
+	_step_legs(speed, delta)
 	return false
+
+## Alternating leg strides + slight body dip + chicken head-bob.
+func _step_legs(speed: float, delta: float) -> void:
+	_stride += delta * speed * 4.2
+	var swing := sin(_stride) * 0.55
+	if _legs.size() == 2:
+		_legs[0].rotation.x = swing
+		_legs[1].rotation.x = -swing
+	# body dips on each footfall (twice per stride cycle)
+	position.y = absf(sin(_stride)) * 0.022
+	# head thrusts forward then holds — the classic chicken bob
+	if _head != null:
+		_head.position.z = _head_base_z + sin(_stride * 2.0) * 0.045
+
+## Ease the legs back to neutral when standing still.
+func _settle_legs(delta: float) -> void:
+	position.y = lerpf(position.y, 0.0, delta * 8.0)
+	for leg in _legs:
+		leg.rotation.x = lerpf(leg.rotation.x, 0.0, delta * 8.0)
+	if _head != null:
+		_head.position.z = lerpf(_head.position.z, _head_base_z, delta * 8.0)
 
 func damage(n: float) -> void:
 	hp -= n
@@ -235,6 +265,6 @@ func damage(n: float) -> void:
 		var tw := create_tween()
 		tw.tween_interval(0.12)
 		tw.tween_callback(func(): _body_mat.emission_enabled = false)
-	game.sfx.play("cluck", -4.0)
+	game.sfx.cluck(-4.0)
 	if hp <= 0.0:
 		game.chicken_died(self)

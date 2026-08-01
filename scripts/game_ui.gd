@@ -14,6 +14,7 @@ var _whisper: Label
 var _hotbar_slots: Array = []
 var _damage_flash: ColorRect
 var _night_shade: ColorRect
+var _fade: ColorRect
 var _market_panel: PanelContainer
 var _market_body: VBoxContainer
 var _overlay: Control
@@ -32,6 +33,13 @@ func setup(g: Node3D) -> void:
 	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_overlay)
+	# added last so the sleep fade covers the HUD and menus too
+	_fade = ColorRect.new()
+	_fade.color = Color(0, 0, 0, 0.0)
+	_fade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fade.visible = false
+	add_child(_fade)
 
 func _label(parent: Node, text: String, size: int, color := Color.WHITE) -> Label:
 	var l := Label.new()
@@ -185,8 +193,8 @@ func refresh() -> void:
 	var hen_txt := "HENS %d" % hens
 	if chicks > 0:
 		hen_txt += " +%d chick" % chicks
-	if game.upgrades.rooster:
-		hen_txt += " +ROO"
+	if game.roosters.size() > 0:
+		hen_txt += " +%d ROO" % game.roosters.size()
 	_chips["hens"].text = hen_txt
 	var pct := int(100.0 * game.coop_hp / game.max_coop_hp())
 	_chips["coop"].text = ("ARMORY %d%%" if game.is_night else "COOP %d%%") % pct
@@ -232,6 +240,20 @@ func whisper(text: String) -> void:
 	tw.tween_property(_whisper, "modulate:a", 0.85, 0.8)
 	tw.tween_interval(2.2)
 	tw.tween_property(_whisper, "modulate:a", 0.0, 1.2)
+
+## Sleep transition. Awaited by the caller.
+func fade_to_black(dur: float) -> void:
+	_fade.color.a = 0.0
+	_fade.visible = true
+	var tw := create_tween()
+	tw.tween_property(_fade, "color:a", 1.0, dur)
+	await tw.finished
+
+func fade_from_black(dur: float) -> void:
+	var tw := create_tween()
+	tw.tween_property(_fade, "color:a", 0.0, dur)
+	await tw.finished
+	_fade.visible = false
 
 func flash_damage() -> void:
 	_damage_flash.color.a = 0.35

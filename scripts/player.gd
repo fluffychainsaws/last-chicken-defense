@@ -126,6 +126,12 @@ func _interact_scan() -> void:
 	if position.distance_to(game.computer_pos) < 2.6:
 		ctx = "market"
 		prompt = "[E]  FARMERS MARKET" if not game.is_night else "[E]  COMPUTER  (signal...?)"
+	elif position.distance_to(game.bed_pos) < 2.6:
+		ctx = "bed"
+		if game.is_night:
+			prompt = "[E]  SLEEP  (not while they're out there)"
+		else:
+			prompt = "[E]  SLEEP UNTIL NIGHTFALL"
 	elif game.is_day() and position.distance_to(game.coop_pos) < 4.5 and game.coop_hp < game.max_coop_hp():
 		ctx = "repair"
 		prompt = "[HOLD E]  REPAIR COOP  (%d%%)" % int(100.0 * game.coop_hp / game.max_coop_hp())
@@ -141,6 +147,11 @@ func _interact_scan() -> void:
 		match ctx:
 			"market":
 				game.open_market()
+			"bed":
+				if game.is_night:
+					game.sfx.play("denied")
+				else:
+					game.sleep_until_night()
 			"chicken":
 				var c = game.nearest_chicken(position, 2.8)
 				if c != null:
@@ -166,7 +177,7 @@ func _use_item() -> void:
 			_fire_cd = 0.9
 			_swing_t = 0.6
 			game.shells -= 1
-			game.sfx.play("shot")
+			game.sfx.play("shot", -4.0)
 			game.shotgun_attack(cam.global_position, -cam.global_transform.basis.z)
 			game.ui.refresh()
 		2:
