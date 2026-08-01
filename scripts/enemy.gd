@@ -110,7 +110,8 @@ func _build_goblin() -> void:
 	var s: float = body_scale
 	# bigger goblins lumber, runts scurry
 	spd *= lerpf(1.15, 0.82, clampf((s / theme["scale"] - 0.85) / 0.45, 0.0, 1.0))
-	if ResourceLoader.exists(GOBLIN_MODEL_PATH):
+	# the authored mesh is ~335k verts; a browser can't carry a wave of them
+	if ResourceLoader.exists(GOBLIN_MODEL_PATH) and not OS.has_feature("web"):
 		_build_goblin_model(s)
 		return
 	_build_goblin_procedural(s)

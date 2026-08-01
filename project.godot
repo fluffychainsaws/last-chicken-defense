@@ -15,3 +15,5 @@ window/size/viewport_height=900
 [rendering]
 
 renderer/rendering_method="forward_plus"
+; Browsers have no Vulkan; WebGL2 requires the compatibility renderer.
+renderer/rendering_method.web="gl_compatibility"

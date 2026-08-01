@@ -89,6 +89,10 @@ var sleeping := false
 var turret_node: Node3D = null
 var _turret_cd := 0.0
 
+## Browsers run the gl_compatibility renderer, which has no volumetric fog,
+## SSAO or SSIL, and far less headroom -- so the web build trims its effects.
+var is_web := OS.has_feature("web")
+
 var started := false
 var paused := true
 var over := false
@@ -154,9 +158,9 @@ func _build_environment() -> void:
 	env.glow_enabled = true
 	env.glow_intensity = 0.5
 	env.glow_bloom = 0.05
-	env.ssao_enabled = true
+	env.ssao_enabled = not is_web
 	env.ssao_intensity = 1.6
-	env.ssil_enabled = true
+	env.ssil_enabled = not is_web
 	env.fog_enabled = true
 	env.fog_density = 0.0006
 	env.fog_aerial_perspective = 0.7
@@ -167,7 +171,7 @@ func _build_environment() -> void:
 	sun = DirectionalLight3D.new()
 	sun.shadow_enabled = true
 	sun.light_angular_distance = 0.4
-	sun.directional_shadow_max_distance = 150.0
+	sun.directional_shadow_max_distance = 70.0 if is_web else 150.0
 	sun.directional_shadow_blend_splits = true
 	add_child(sun)
 	moonlight = DirectionalLight3D.new()
@@ -367,7 +371,7 @@ func _build_grass() -> void:
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_colors = true
 	mm.mesh = quad
-	var count := 42000
+	var count := 11000 if is_web else 42000
 	mm.instance_count = count
 	var idx := 0
 	while idx < count:
@@ -995,10 +999,16 @@ func _update_environment() -> void:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		env.ambient_light_color = Color(0.28, 0.1, 0.12) if boss else Color(0.12, 0.15, 0.25)
 		env.ambient_light_energy = 0.5
-		env.fog_enabled = false
-		env.volumetric_fog_enabled = true
-		env.volumetric_fog_density = 0.028 if boss else 0.012
-		env.volumetric_fog_albedo = Color(0.55, 0.15, 0.15) if boss else Color(0.35, 0.45, 0.7)
+		if is_web:
+			# no volumetric fog in gl_compatibility; fall back to depth fog
+			env.fog_enabled = true
+			env.fog_density = 0.03 if boss else 0.018
+			env.fog_light_color = Color(0.16, 0.03, 0.05) if boss else Color(0.05, 0.07, 0.14)
+		else:
+			env.fog_enabled = false
+			env.volumetric_fog_enabled = true
+			env.volumetric_fog_density = 0.028 if boss else 0.012
+			env.volumetric_fog_albedo = Color(0.55, 0.15, 0.15) if boss else Color(0.35, 0.45, 0.7)
 	else:
 		var ang := lerpf(0.10, 0.90, phase_t) * PI
 		var elev := sin(ang)
@@ -1009,9 +1019,11 @@ func _update_environment() -> void:
 		moonlight.light_energy = 0.0
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 		env.ambient_light_energy = lerpf(0.6, 1.0, elev)
-		env.volumetric_fog_enabled = false
+		if not is_web:
+			env.volumetric_fog_enabled = false
 		env.fog_enabled = true
 		env.fog_density = 0.0006
+		env.fog_light_color = Color(0.7, 0.8, 0.95)
 	if window_mat != null:
 		window_mat.emission_energy_multiplier = 2.2 if is_night else 0.15
 
