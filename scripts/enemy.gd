@@ -3,6 +3,14 @@ extends Node3D
 
 const MK = preload("res://scripts/meshkit.gd")
 
+## Authored models, used in place of the procedural build when present.
+const GOBLIN_MODEL_PATH := "res://models/goblin.glb"
+## Measured from the source .glb: full height, and distance from origin down to the feet.
+const GOBLIN_MODEL_HEIGHT := 1.903
+const GOBLIN_MODEL_FOOT_OFFSET := 0.955
+## Yaw correction so the model's face points along +Z like the procedural enemies.
+const GOBLIN_MODEL_YAW := 180.0
+
 const THEMES := [
 	{"id": "zombie", "name": "THE SHUFFLING DEAD", "sub": "they smell the eggs", "body": Color(0.35, 0.49, 0.29), "eye": Color(1, 0.15, 0.15), "scale": 1.0, "speed": 2.2, "hp": 50.0, "dmg": 8.0, "bounty": 4, "base": 5.0, "per": 1.6},
 	{"id": "goblin", "name": "THE GOBLIN GRAB-GANG", "sub": "quick little hands", "body": Color(0.29, 0.6, 0.25), "eye": Color(1, 0.9, 0.2), "scale": 0.75, "speed": 3.6, "hp": 30.0, "dmg": 5.0, "bounty": 3, "base": 6.0, "per": 2.0},
@@ -102,6 +110,84 @@ func _build_goblin() -> void:
 	var s: float = body_scale
 	# bigger goblins lumber, runts scurry
 	spd *= lerpf(1.15, 0.82, clampf((s / theme["scale"] - 0.85) / 0.45, 0.0, 1.0))
+	if ResourceLoader.exists(GOBLIN_MODEL_PATH):
+		_build_goblin_model(s)
+		return
+	_build_goblin_procedural(s)
+
+## The source .glb has no vertex normals, so lighting renders it black. Build the
+## normals once with SurfaceTool and share the result across every goblin.
+static var _goblin_mesh_cache: Mesh = null
+static var _goblin_xform_cache := Transform3D.IDENTITY
+static var _goblin_prepared := false
+
+static func goblin_mesh() -> Mesh:
+	if _goblin_prepared:
+		return _goblin_mesh_cache
+	_goblin_prepared = true
+	if not ResourceLoader.exists(GOBLIN_MODEL_PATH):
+		return null
+	var root: Node3D = load(GOBLIN_MODEL_PATH).instantiate()
+	var src: MeshInstance3D = _first_mesh(root)
+	if src != null:
+		_goblin_xform_cache = src.transform
+		var st := SurfaceTool.new()
+		st.create_from(src.mesh, 0)
+		st.generate_normals()
+		_goblin_mesh_cache = st.commit()
+	root.free()
+	return _goblin_mesh_cache
+
+static func _first_mesh(n: Node) -> MeshInstance3D:
+	if n is MeshInstance3D:
+		return n
+	for c in n.get_children():
+		var found := _first_mesh(c)
+		if found != null:
+			return found
+	return null
+
+## Authored goblin: scaled to gameplay height, dropped so the feet meet the ground,
+## with a per-instance material so the damage flash only tints the one that got hit.
+func _build_goblin_model(s: float) -> void:
+	var mesh := goblin_mesh()
+	if mesh == null:
+		_build_goblin_procedural(s)
+		return
+	var inst := MeshInstance3D.new()
+	inst.mesh = mesh
+	inst.transform = _goblin_xform_cache
+	var holder := Node3D.new()
+	holder.add_child(inst)
+	# theme scale 0.75 should read as a ~1.5 m goblin
+	var want_h := 1.5 * (s / float(theme["scale"]))
+	var ms := want_h / GOBLIN_MODEL_HEIGHT
+	holder.scale = Vector3.ONE * ms
+	holder.position.y = GOBLIN_MODEL_FOOT_OFFSET * ms
+	holder.rotation.y = deg_to_rad(GOBLIN_MODEL_YAW)
+	add_child(holder)
+	# The source .glb carries no UVs, vertex colors or texture (geometry-only
+	# export), so skin it here. Triplanar mapping works without UVs.
+	var skins := [
+		Color(0.42, 0.60, 0.24), Color(0.34, 0.52, 0.22), Color(0.52, 0.66, 0.30),
+		Color(0.26, 0.47, 0.29), Color(0.28, 0.55, 0.55),
+	]
+	var skin: Color = skins[randi() % skins.size()]
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = skin
+	mat.roughness = 0.8
+	inst.set_surface_override_material(0, mat)
+	_mats.append(mat)
+
+func _mesh_children(n: Node) -> Array:
+	var acc := []
+	if n is MeshInstance3D:
+		acc.append(n)
+	for c in n.get_children():
+		acc += _mesh_children(c)
+	return acc
+
+func _build_goblin_procedural(s: float) -> void:
 	var skins := [
 		Color(0.42, 0.60, 0.24), Color(0.34, 0.52, 0.22), Color(0.52, 0.66, 0.30),
 		Color(0.26, 0.47, 0.29), Color(0.28, 0.55, 0.55),

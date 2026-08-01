@@ -4,6 +4,9 @@ extends Node3D
 
 const MK = preload("res://scripts/meshkit.gd")
 
+## How far from the coop he'll pursue before returning to his post.
+const LEASH := 20.0
+
 var game: Node3D
 # strut | to_perch | perch | swoop
 var state := "strut"
@@ -120,7 +123,11 @@ func tick(delta: float) -> void:
 				return
 			# an enemy pulled from game.enemies (killed, carried off, burned at dawn)
 			# can still be a live node until end-of-frame, so check membership too
-			if _victim == null or not is_instance_valid(_victim) or not game.enemies.has(_victim) or _victim.state == "burn":
+			var lost: bool = _victim == null or not is_instance_valid(_victim) or not game.enemies.has(_victim) or _victim.state == "burn"
+			# he guards the coop; he doesn't chase things across the map
+			if not lost and _victim.position.distance_to(game.coop_pos) > LEASH:
+				lost = true
+			if lost:
 				_victim = game.nearest_enemy(game.coop_pos, 8.5)
 				if _victim == null:
 					state = "to_perch"
