@@ -357,8 +357,8 @@ func _build_midget() -> void:
 	var iris_c: Color = irises[randi() % irises.size()]
 
 	var maps := skin_maps("midget", 7717, 0.05, 4242, 0.16)
-	var skin := MK.oily_mat(hide, maps[0], maps[1], 2.2)
-	var belly := MK.oily_mat(hide.lightened(0.28), maps[0], maps[1], 2.6)
+	var skin := MK.oily_mat(hide, maps[0], maps[1], 2.2, 0.18, true)
+	var belly := MK.oily_mat(hide.lightened(0.28), maps[0], maps[1], 2.6, 0.18, true)
 	# horn and claw keratin: still wet-looking, but harder and less mottled
 	var keratin := MK.oily_mat(horn_c, null, null, 1.0, 0.22)
 	_mats.append(skin)
@@ -533,6 +533,15 @@ func _build_midget() -> void:
 		MK.sphere(club, 0.055 * s, wood.darkened(0.1), Vector3(0, length * 0.9, 0))
 		if randf() < 0.5:
 			MK.sphere(club, 0.03 * s, wood.lightened(0.08), Vector3(0.02 * s, length * 0.6, 0))
+	_batch_body()
+
+## Batch a finished procedural body. Each animated joint collapses on its own so
+## it can still swing, then everything static collapses together. Purely a
+## draw-call saving — the geometry is unchanged.
+func _batch_body() -> void:
+	for hip in _legs:
+		MK.merge(hip)
+	MK.merge(self, _legs)
 
 ## Frost walkers: the slow tanky wave, so they need to read as heavy. A hulking
 ## hunched slab, wider at the shoulders than the hips, crusted over with rime and
@@ -552,7 +561,7 @@ func _build_frost() -> void:
 
 	var maps := skin_maps("frost", 3311, 0.07, 9182, 0.24)
 	# frozen hide: wet-ice specular over a cracked normal
-	var skin := MK.oily_mat(hide, maps[0], maps[1], 1.6, 0.14)
+	var skin := MK.oily_mat(hide, maps[0], maps[1], 1.6, 0.14, true)
 	# ice itself is smoother and brighter than the flesh under it
 	var ice := MK.oily_mat(rime, null, null, 1.0, 0.05)
 	_mats.append(skin)
@@ -644,6 +653,7 @@ func _build_frost() -> void:
 			var tx := (float(i) - 1.5) * 0.06 * s
 			var fang := MK.skinned(head, MK.cone_mesh(0.022 * s, 0.09 * s), ice, Vector3(tx, -0.11 * s, hr * 0.95))
 			fang.rotation.x = deg_to_rad(180)
+	_batch_body()
 
 ## The grey ones: the classic abductor build — spindly limbs, no bulk anywhere,
 ## and a cranium far too big for the body, so the whole silhouette is top-heavy.
@@ -661,7 +671,7 @@ func _build_grey() -> void:
 	var eye_c := Color(0.4, 0.88, 1.0)
 
 	# no texture: their whole look is smooth, featureless and slightly waxy
-	var skin := MK.oily_mat(hide, null, null, 1.0, 0.32)
+	var skin := MK.oily_mat(hide, null, null, 1.0, 0.32, true)
 	var eye_mat := MK.oily_mat(Color(0.03, 0.03, 0.05), null, null, 1.0, 0.04)
 	_mats.append(skin)
 
@@ -739,6 +749,7 @@ func _build_grey() -> void:
 	var mouth := MK.add_mesh(head, MK.sphere_mesh(0.05 * s), hide.darkened(0.5),
 		Vector3(0, -0.23 * s, hr * 0.66))
 	mouth.scale = Vector3(1.5, 0.22, 0.5)
+	_batch_body()
 
 ## A proper dragon: serpentine neck, horned skull, membrane wings with finger
 ## struts, four clawed legs, spined back and a long spade-tipped tail.
