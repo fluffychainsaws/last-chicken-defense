@@ -1,0 +1,68 @@
+name: Set up Godot
+description: Install the Godot editor plus export templates, cached on the release tag.
+
+inputs:
+  version:
+    description: Godot release tag, e.g. 4.7-stable
+    required: true
+  template-dir:
+    description: >-
+      Export template directory name. Godot expects the '.' form (4.7.stable),
+      not the '-' used in the release tag (4.7-stable).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Cache Godot editor and export templates
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/godot-bin
+          ~/.local/share/godot/export_templates
+        key: godot-${{ inputs.version }}
+
+    - name: Install Godot and export templates
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        base="https://github.com/godotengine/godot-builds/releases/download/${{ inputs.version }}"
+
+        curl -fsSL -o godot.zip \
+          "${base}/Godot_v${{ inputs.version }}_linux.x86_64.zip"
+        curl -fsSL -o templates.tpz \
+          "${base}/Godot_v${{ inputs.version }}_export_templates.tpz"
+
+        mkdir -p ~/godot-bin
+        unzip -q godot.zip -d godot-unpacked
+        # The zip contains a single versioned binary; don't hardcode its name.
+        find godot-unpacked -type f -name 'Godot_v*' -exec mv {} ~/godot-bin/godot \;
+        chmod +x ~/godot-bin/godot
+
+        # The .tpz unpacks to a flat 'templates/' dir that Godot expects to find
+        # renamed to the version it was built from.
+        mkdir -p ~/.local/share/godot/export_templates
+        unzip -q templates.tpz -d templates-unpacked
+        mv templates-unpacked/templates \
+          "$HOME/.local/share/godot/export_templates/${{ inputs.template-dir }}"
+
+        rm -rf godot.zip templates.tpz godot-unpacked templates-unpacked
+
+    - name: Add Godot to PATH
+      shell: bash
+      run: echo "$HOME/godot-bin" >> "$GITHUB_PATH"
+
+    - name: Import project resources
+      shell: bash
+      run: |
+        set -uo pipefail
+        # Godot must build its .godot/ import cache before anything can be
+        # exported. A headless import reports a non-zero status on benign
+        # warnings, so gate on the cache actually being produced instead.
+        godot --headless --path . --import || true
+        test -d .godot/imported || {
+          echo "::error::Resource import produced no .godot/imported cache"
+          exit 1
+        }

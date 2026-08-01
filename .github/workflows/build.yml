@@ -1,0 +1,109 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Allow the deploy job to publish to Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; let an in-flight run finish rather than
+# cancelling it half-published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  GODOT_VERSION: 4.7-stable
+  GODOT_TEMPLATE_DIR: 4.7.stable
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-godot
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          template-dir: ${{ env.GODOT_TEMPLATE_DIR }}
+
+      - name: Export Web build
+        run: |
+          set -euo pipefail
+          # Godot will not create the target directory itself.
+          mkdir -p build/web
+          godot --headless --path . --export-release "Web" build/web/index.html
+          # --export-release can exit 0 having written nothing, so verify the
+          # artifacts the browser actually needs.
+          for f in index.html index.wasm index.pck; do
+            test -s "build/web/$f" || {
+              echo "::error::Export did not produce build/web/$f"
+              exit 1
+            }
+          done
+          # Belt and braces: Pages via Actions serves the upload verbatim, but
+          # this keeps underscore-prefixed files safe if the source ever changes.
+          touch build/web/.nojekyll
+          ls -lh build/web
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  # The desktop build is the one that renders the game as designed: forward_plus
+  # with Vulkan, so clearcoat and volumetric fog work, and the authored
+  # goblin.glb ships instead of the procedural stand-in the web build falls back
+  # to. Runs alongside the web job rather than gating it.
+  windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-godot
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          template-dir: ${{ env.GODOT_TEMPLATE_DIR }}
+
+      - name: Export Windows build
+        run: |
+          set -euo pipefail
+          mkdir -p build/windows
+          godot --headless --path . \
+            --export-release "Windows Desktop" build/windows/LastChickenDefense.exe
+          exe=build/windows/LastChickenDefense.exe
+          test -s "$exe" || {
+            echo "::error::Export did not produce $exe"
+            exit 1
+          }
+          # The preset embeds the pck in the binary, so a build that silently
+          # shipped without game data would still be a valid exe — check the
+          # size rather than mere existence.
+          size=$(stat -c%s "$exe")
+          if [ "$size" -lt 60000000 ]; then
+            echo "::error::$exe is only $size bytes; the embedded pck looks missing"
+            exit 1
+          fi
+          file "$exe"
+          ls -lh build/windows
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: LastChickenDefense-windows
+          path: build/windows/LastChickenDefense.exe
+          # single self-contained exe; zipping it again buys nothing
+          compression-level: 0
+
+  deploy:
+    needs: web
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
