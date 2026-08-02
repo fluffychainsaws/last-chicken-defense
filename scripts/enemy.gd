@@ -17,6 +17,7 @@ const THEMES := [
 	{"id": "midget", "name": "FURIOUS MIDGET PEOPLE WITH STICKS", "sub": "so many sticks", "body": Color(0.54, 0.35, 0.17), "eye": Color(1, 1, 1), "scale": 0.6, "speed": 4.2, "hp": 22.0, "dmg": 4.0, "bounty": 3, "base": 8.0, "per": 2.4, "stick": true},
 	{"id": "grey", "name": "THE GREY ONES", "sub": "they come for the yolk", "body": Color(0.6, 0.64, 0.68), "eye": Color(0.4, 0.88, 1), "scale": 0.9, "speed": 2.8, "hp": 45.0, "dmg": 7.0, "bounty": 5, "base": 4.0, "per": 1.4},
 	{"id": "bones", "name": "THE RATTLING BONES", "sub": "calcium seeks calcium", "body": Color(0.85, 0.83, 0.75), "eye": Color(0.5, 1, 0.5), "scale": 1.0, "speed": 3.0, "hp": 35.0, "dmg": 6.0, "bounty": 4, "base": 6.0, "per": 1.8},
+	{"id": "musk", "name": "THE MUSK", "sub": "you smell it before you see it", "body": Color(0.60, 0.58, 0.53), "eye": Color(0.85, 0.92, 1.0), "scale": 1.5, "speed": 3.2, "hp": 90.0, "dmg": 14.0, "bounty": 9, "base": 2.0, "per": 0.8},
 	{"id": "frost", "name": "THE FROST WALKERS", "sub": "winter wants chicken soup", "body": Color(0.62, 0.84, 0.91), "eye": Color(0.7, 0.95, 1), "scale": 1.15, "speed": 1.6, "hp": 120.0, "dmg": 12.0, "bounty": 8, "base": 3.0, "per": 1.0},
 	{"id": "wolf", "name": "THE BIG BAD WOLF", "sub": "he huffed. he puffed.", "body": Color(0.3, 0.28, 0.3), "eye": Color(1, 0.3, 0.1), "scale": 2.2, "speed": 4.5, "hp": 400.0, "dmg": 20.0, "bounty": 60, "base": 1.0, "per": 0.0, "boss": true, "min_night": 4, "ears": true, "escort": 3},
 	{"id": "bigfoot", "name": "BIGFOOT", "sub": "he is real and he is hungry", "body": Color(0.42, 0.3, 0.2), "eye": Color(1, 1, 0.6), "scale": 2.6, "speed": 3.0, "hp": 600.0, "dmg": 25.0, "bounty": 80, "base": 1.0, "per": 0.0, "boss": true, "min_night": 6},
@@ -110,6 +111,9 @@ func _build_mesh() -> void:
 		return
 	if theme.get("id", "") == "bigfoot":
 		_build_bigfoot()
+		return
+	if theme.get("id", "") == "musk":
+		_build_musk()
 		return
 	var s: float = body_scale
 	var body_c: Color = theme["body"]
@@ -993,6 +997,153 @@ func _build_bigfoot() -> void:
 			var tx := (float(i) - 1.5) * 0.045 * s
 			MK.skinned(head, MK.cone_mesh(0.018 * s, 0.06 * s), MK.dry_mat(Color(0.9, 0.88, 0.78), null, null, 0.45),
 				Vector3(tx, -0.16 * s, hr * 1.12)).rotation.x = deg_to_rad(180)
+	_batch_body()
+
+## The Musk: everything about it is stretched. Stilt legs, arms long enough that
+## the knuckles reach the ground, a ribcage with nothing on it, and a skull hung
+## low and forward off shoulders that sit higher than the head. The antlers are
+## the only wide thing on it, which is what makes the rest read as starved.
+func _build_musk() -> void:
+	body_scale *= randf_range(0.92, 1.1)
+	var s: float = body_scale
+	var detail := not OS.has_feature("web")
+
+	var hides := [
+		Color(0.58, 0.56, 0.51), Color(0.64, 0.61, 0.56),
+		Color(0.52, 0.52, 0.50), Color(0.61, 0.57, 0.52),
+	]
+	var hide: Color = hides[randi() % hides.size()]
+	var horn_c := Color(0.50, 0.44, 0.35)
+	var tooth_c := Color(0.90, 0.88, 0.80)
+	var eye_c := Color(0.85, 0.92, 1.0)
+
+	var maps := skin_maps("musk", 9090, 0.075, 4747, 0.28)
+	# taut grey hide stretched over bone: SSS sells the thinness of it
+	var skin := MK.dry_mat(hide, maps[0], maps[1], 0.58, true)
+	var horn := MK.dry_mat(horn_c, maps[0], maps[1], 0.66)
+	var tooth := MK.dry_mat(tooth_c, null, null, 0.4)
+	_mats.append(skin)
+	_mats.append(horn)
+
+	# --- stilt legs: long, thin, sharply bent, ending in a point ---
+	for side in [-1.0, 1.0]:
+		var hip := Node3D.new()
+		hip.position = Vector3(side * 0.19 * s, 1.05 * s, 0)
+		add_child(hip)
+		_legs.append(hip)
+		MK.skinned(hip, MK.sphere_mesh(0.07 * s), skin, Vector3.ZERO)
+		MK.skinned(hip, MK.sphere_mesh(0.052 * s), skin, Vector3(0, -0.24 * s, 0)).scale = Vector3(1.0, 4.6, 1.0)
+		var knee := Node3D.new()
+		knee.position = Vector3(0, -0.5 * s, 0)
+		hip.add_child(knee)
+		_knees.append(knee)
+		MK.skinned(knee, MK.sphere_mesh(0.058 * s), skin, Vector3.ZERO)
+		MK.skinned(knee, MK.sphere_mesh(0.042 * s), skin, Vector3(0, -0.26 * s, 0.01 * s)).scale = Vector3(1.0, 5.2, 1.0)
+		# a narrow splayed foot, barely enough to stand on
+		var foot := MK.skinned(knee, MK.sphere_mesh(0.06 * s), skin, Vector3(0, -0.52 * s, 0.04 * s))
+		foot.scale = Vector3(0.7, 0.4, 1.6)
+		if detail:
+			for t in 2:
+				var toe := MK.skinned(knee, MK.cone_mesh(0.018 * s, 0.09 * s), horn,
+					Vector3((float(t) - 0.5) * 0.045 * s, -0.54 * s, 0.13 * s))
+				toe.rotation.x = deg_to_rad(100)
+
+	# --- torso: a narrow ribbed cage, hunched hard forward ---
+	var torso := Node3D.new()
+	torso.position = Vector3(0, 1.05 * s, 0)
+	torso.rotation.x = deg_to_rad(19)
+	add_child(torso)
+	MK.skinned(torso, MK.sphere_mesh(0.12 * s, 20, 10), skin, Vector3(0, 0.1 * s, 0)).scale = Vector3(1.25, 1.5, 0.85)
+	# ribs left proudly visible — the whole read is "nothing spare on it"
+	for i in 7:
+		var t := float(i) / 6.0
+		var r := lerpf(0.155, 0.12, t) * s
+		var rib := MK.skinned(torso, MK.torus_mesh(r - 0.016 * s, r), skin,
+			Vector3(0, (0.24 + float(i) * 0.11) * s, 0))
+		rib.rotation.x = deg_to_rad(84)
+		rib.scale = Vector3(1.0, 1.0, 0.7)
+	# shoulders ride high — the head hangs well below them, which is the whole
+	# silhouette. Level with the head and the two merge into one lump.
+	var yoke := MK.skinned(torso, MK.sphere_mesh(0.15 * s, 20, 10), skin, Vector3(0, 1.06 * s, -0.03 * s))
+	yoke.scale = Vector3(1.7, 0.85, 0.95)
+
+	# --- arms: absurdly long, hanging so the hands reach the ground ---
+	for side in [-1.0, 1.0]:
+		var sh := Node3D.new()
+		sh.position = Vector3(side * 0.26 * s, 1.02 * s, 0)
+		sh.rotation.x = deg_to_rad(-19)
+		sh.rotation.z = deg_to_rad(-side * 5.0)
+		torso.add_child(sh)
+		_arms.append(sh)
+		_arm_rest.append(sh.rotation.x)
+		MK.skinned(sh, MK.sphere_mesh(0.055 * s), skin, Vector3.ZERO)
+		MK.skinned(sh, MK.sphere_mesh(0.045 * s), skin, Vector3(0, -0.3 * s, 0)).scale = Vector3(1.0, 6.4, 1.0)
+		MK.skinned(sh, MK.sphere_mesh(0.05 * s), skin, Vector3(0, -0.62 * s, 0))
+		MK.skinned(sh, MK.sphere_mesh(0.038 * s), skin, Vector3(0, -0.92 * s, 0.01 * s)).scale = Vector3(1.0, 6.8, 1.0)
+		# wrist knob closes the gap: the forearm ends at -1.18, so fingers hung
+		# any lower than that float free of the arm
+		MK.skinned(sh, MK.sphere_mesh(0.042 * s), skin, Vector3(0, -1.19 * s, 0.01 * s)).scale = Vector3(1.0, 1.2, 0.8)
+		# long grasping fingers, the last thing a chicken sees
+		if detail:
+			for f in 4:
+				var fin := MK.skinned(sh, MK.sphere_mesh(0.014 * s), skin,
+					Vector3((float(f) - 1.5) * 0.032 * s, -1.27 * s, 0.02 * s))
+				fin.scale = Vector3(1.0, 5.2, 1.0)
+				fin.rotation.x = deg_to_rad(randf_range(-10, 14))
+
+	# --- head: slung low and forward, well below the shoulder line ---
+	var head := Node3D.new()
+	head.position = Vector3(0, 0.86 * s, 0.3 * s)
+	head.rotation.x = deg_to_rad(-4)
+	torso.add_child(head)
+	var hr := 0.15 * s
+	var skull := MK.skinned(head, MK.sphere_mesh(hr, 24, 12), skin, Vector3.ZERO)
+	skull.scale = Vector3(1.0, 1.1, 1.15)
+	# the long face: a muzzle drawn out forward and tipped down
+	var muzzle := MK.skinned(head, MK.sphere_mesh(0.1 * s, 20, 10), skin, Vector3(0, -0.1 * s, hr * 1.15))
+	muzzle.scale = Vector3(0.8, 0.85, 2.3)
+	muzzle.rotation.x = deg_to_rad(14)
+	# sunken sockets: deep hollows with a cold pinprick far back inside
+	for side in [-1.0, 1.0]:
+		var ex: float = side * 0.072 * s
+		var socket := MK.add_mesh(head, MK.sphere_mesh(0.052 * s), Color(0.04, 0.04, 0.05),
+			Vector3(ex, 0.03 * s, hr * 0.82))
+		socket.scale = Vector3(1.0, 1.15, 0.6)
+		MK.add_mesh(head, MK.sphere_mesh(0.016 * s), eye_c, Vector3(ex, 0.03 * s, hr * 0.92), true, 1.4)
+	# the grin: a long row of teeth running the length of the muzzle, each one
+	# clear of the surface so the whole jaw reads as bared rather than closed
+	var n_teeth := 9
+	for i in n_teeth:
+		var t := float(i) / float(n_teeth - 1)
+		var side: float = 1.0 if i % 2 == 0 else -1.0
+		var z := hr * (0.75 + t * 1.55)
+		var y := -0.08 * s - t * 0.045 * s
+		var up := MK.skinned(head, MK.cone_mesh(0.016 * s, 0.055 * s), tooth,
+			Vector3(side * 0.05 * s * (1.0 - t * 0.45), y, z))
+		up.rotation.x = deg_to_rad(180)
+		up.rotation.z = deg_to_rad(side * 8.0)
+		var low := MK.skinned(head, MK.cone_mesh(0.013 * s, 0.045 * s), tooth,
+			Vector3(side * 0.045 * s * (1.0 - t * 0.45), y - 0.045 * s, z))
+		low.rotation.z = deg_to_rad(side * 8.0)
+	# dark gum line behind the teeth, kept shallow so it never hides them
+	var gum := MK.add_mesh(head, MK.sphere_mesh(0.075 * s), Color(0.11, 0.06, 0.07),
+		Vector3(0, -0.11 * s, hr * 1.3))
+	gum.scale = Vector3(0.75, 0.42, 1.9)
+
+	# --- antlers: the only wide thing on the whole creature ---
+	for side in [-1.0, 1.0]:
+		var base := Vector3(side * 0.075 * s, 0.13 * s, -0.02 * s)
+		var beam := MK.skinned(head, MK.cone_mesh(0.034 * s, 0.6 * s), horn, base + Vector3(side * 0.07 * s, 0.26 * s, 0))
+		beam.rotation.z = deg_to_rad(-side * 24.0)
+		beam.rotation.x = deg_to_rad(-12)
+		# tines branching off the beam, shorter as they go up
+		var tines := randi_range(3, 4)
+		for i in tines:
+			var t := float(i) / float(tines - 1)
+			var tine := MK.skinned(head, MK.cone_mesh(0.022 * s, lerpf(0.36, 0.2, t) * s), horn,
+				base + Vector3(side * (0.13 + t * 0.19) * s, (0.3 + t * 0.28) * s, -0.02 * s))
+			tine.rotation.z = deg_to_rad(-side * lerpf(52.0, 30.0, t))
+			tine.rotation.x = deg_to_rad(randf_range(-26, -6))
 	_batch_body()
 
 ## Batch a finished procedural body. Each animated joint collapses on its own so
