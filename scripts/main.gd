@@ -81,8 +81,11 @@ var coop_hp := 300.0
 var coop_broken := false
 var night_theme := {}
 
-var coop_pos := Vector3(20, 0, -12)
-var coop_door := Vector3(17.6, 0, -12)
+## The coop sits in the middle of the yard with its run around the door, so the
+## hens defend from the centre rather than from one corner. Geometry below is
+## derived from these, so moving them moves the building and the run together.
+var coop_pos := Vector3(4, 0, 0)
+var coop_door := Vector3(1.6, 0, 0)
 var computer_pos := Vector3(-24.2, 1.0, -12)
 var bed_pos := Vector3(-16.6, 0.0, -14.6)
 var sleeping := false
@@ -300,12 +303,14 @@ func _build_house() -> void:
 func _build_coop() -> void:
 	var coop_m := MK.tex_mat(Color(0.95, 0.38, 0.28), _wood_tex, 2.5, 0.95, _wood_norm)
 	var roof_m := MK.tex_mat(Color(0.45, 0.3, 0.2), _wood_tex, 3.0, 0.95, _wood_norm)
-	_tex_wall(Vector3(3.6, 2.6, 3.2), Vector3(20, 1.3, -12), coop_m)
-	var roof := MK.box(self, Vector3(4.4, 0.2, 4.0), Color.WHITE, Vector3(20, 2.85, -12))
+	var cx: float = coop_pos.x
+	var cz: float = coop_pos.z
+	_tex_wall(Vector3(3.6, 2.6, 3.2), Vector3(cx, 1.3, cz), coop_m)
+	var roof := MK.box(self, Vector3(4.4, 0.2, 4.0), Color.WHITE, Vector3(cx, 2.85, cz))
 	roof.material_override = roof_m
 	roof.rotation.z = 0.14
-	MK.box(self, Vector3(0.06, 1.3, 0.95), Color(0.08, 0.06, 0.05), Vector3(18.18, 0.65, -12))
-	MK.box(self, Vector3(0.06, 0.45, 1.5), Color(0.9, 0.88, 0.8), Vector3(18.15, 1.95, -12))
+	MK.box(self, Vector3(0.06, 1.3, 0.95), Color(0.08, 0.06, 0.05), Vector3(cx - 1.82, 0.65, cz))
+	MK.box(self, Vector3(0.06, 0.45, 1.5), Color(0.9, 0.88, 0.8), Vector3(cx - 1.85, 1.95, cz))
 
 func _tex_wall(size: Vector3, pos: Vector3, m: Material) -> void:
 	MK.static_box(self, size, pos)
@@ -313,11 +318,19 @@ func _tex_wall(size: Vector3, pos: Vector3, m: Material) -> void:
 
 func _build_run_fence() -> void:
 	var wire := Color(0.75, 0.75, 0.78, 0.4)
-	MK.box(self, Vector3(12, 1.1, 0.06), wire, Vector3(22, 0.55, -6))
-	MK.box(self, Vector3(12, 1.1, 0.06), wire, Vector3(22, 0.55, 4))
-	MK.box(self, Vector3(0.06, 1.1, 10), wire, Vector3(28, 0.55, -1))
-	MK.box(self, Vector3(0.06, 1.1, 3.6), wire, Vector3(16, 0.55, -4.2))
-	MK.box(self, Vector3(0.06, 1.1, 3.6), wire, Vector3(16, 0.55, 2.2))
+	# A pen on the door side of the coop, open where it meets the wall so the
+	# hens can get in and out. Three sides, sized off the coop rather than
+	# hardcoded, so the run follows if the coop is ever moved again.
+	var cx: float = coop_pos.x
+	var cz: float = coop_pos.z
+	var east := cx - 1.8
+	var west := cx - 10.0
+	var half := 5.0
+	var mid := (east + west) * 0.5
+	var span := east - west
+	MK.box(self, Vector3(span, 1.1, 0.06), wire, Vector3(mid, 0.55, cz - half))
+	MK.box(self, Vector3(span, 1.1, 0.06), wire, Vector3(mid, 0.55, cz + half))
+	MK.box(self, Vector3(0.06, 1.1, half * 2.0), wire, Vector3(west, 0.55, cz))
 
 func _build_perimeter_fence() -> void:
 	fence_mat = MK.tex_mat(Color(0.85, 0.62, 0.38), _wood_tex, 1.5, 0.95, _wood_norm)
