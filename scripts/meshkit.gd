@@ -114,7 +114,11 @@ static func cone_mesh(r: float, h: float, segs := 8) -> CylinderMesh:
 ## Forward+ gets a clearcoat lacquer for the greasy sheen; the compatibility
 ## renderer (web) silently drops clearcoat, so there the roughness is pulled
 ## down instead to keep the highlight from washing out flat.
-static func oily_mat(color: Color, tex: Texture2D, normal: Texture2D, uv_scale := 2.0, rough := 0.18) -> StandardMaterial3D:
+## `sss` adds subsurface scattering, which is what stops flesh reading as
+## painted plastic — light penetrates a little and bleeds back out. Opt-in
+## rather than default: it belongs on skin, not on ice, keratin or eyeballs,
+## and it is forward_plus only, so web silently gets nothing either way.
+static func oily_mat(color: Color, tex: Texture2D, normal: Texture2D, uv_scale := 2.0, rough := 0.18, sss := false) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = color
 	if tex != null:
@@ -138,7 +142,75 @@ static func oily_mat(color: Color, tex: Texture2D, normal: Texture2D, uv_scale :
 		m.clearcoat_enabled = true
 		m.clearcoat = 0.9
 		m.clearcoat_roughness = 0.05
+		if sss:
+			m.subsurf_scatter_enabled = true
+			m.subsurf_scatter_strength = 0.55
+			# skin_mode uses the wider, redder falloff meant for flesh
+			m.subsurf_scatter_skin_mode = true
+			# thin parts — ears, fingers, webbing — glow when backlit by the moon
+			m.subsurf_scatter_transmittance_enabled = true
+			m.subsurf_scatter_transmittance_color = color.lerp(Color(0.9, 0.35, 0.3), 0.55)
+			m.subsurf_scatter_transmittance_depth = 0.35
+			m.subsurf_scatter_transmittance_boost = 0.25
 	return m
+
+## Collapse a node's MeshInstance3D descendants into one MeshInstance3D carrying
+## a surface per distinct material, baking each piece's transform into its
+## vertices. A creature built from seventy primitives costs seventy draw calls;
+## merged, it costs one per material.
+##
+## This is a batching win, not a modelling one — the primitives still
+## interpenetrate exactly as before, because nothing here computes a boolean
+## union. Normals are carried over untouched for the same reason: regenerating
+## them across pieces that overlap rather than join would wreck the shading.
+##
+## Anything in `stop` is left alone, subtree and all. Animated joints belong
+## there — bake a leg into the body and it can no longer swing.
+static func merge(holder: Node3D, stop := []) -> void:
+	var found: Array = []
+	_gather(holder, Transform3D.IDENTITY, stop, found)
+	if found.size() < 2:
+		return
+	# group by material, preserving first-seen order so surfaces are stable
+	var order: Array = []
+	var groups := {}
+	for entry in found:
+		var m: Material = entry[2]
+		if not groups.has(m):
+			groups[m] = []
+			order.append(m)
+		groups[m].append(entry)
+	var out := ArrayMesh.new()
+	for m in order:
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for entry in groups[m]:
+			st.append_from(entry[0], 0, entry[1])
+		st.commit(out)
+	for entry in found:
+		var n: MeshInstance3D = entry[3]
+		n.get_parent().remove_child(n)
+		n.queue_free()
+	var merged := MeshInstance3D.new()
+	merged.mesh = out
+	holder.add_child(merged)
+	# keep the very same material instances, so a damage flash still finds them
+	for i in order.size():
+		merged.set_surface_override_material(i, order[i])
+
+static func _gather(n: Node, xform: Transform3D, stop: Array, acc: Array) -> void:
+	for c in n.get_children():
+		if c in stop:
+			continue
+		if not (c is Node3D):
+			continue
+		var child_x: Transform3D = xform * (c as Node3D).transform
+		if c is MeshInstance3D:
+			var mi := c as MeshInstance3D
+			var mat := mi.material_override
+			if mi.mesh != null and mat != null:
+				acc.append([mi.mesh, child_x, mat, mi])
+		_gather(c, child_x, stop, acc)
 
 ## Invisible (or colored) static collider box.
 static func static_box(parent: Node3D, size: Vector3, pos: Vector3, color = null) -> StaticBody3D:
