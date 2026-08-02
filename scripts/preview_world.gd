@@ -8,6 +8,8 @@ var _frames := 0
 var _out := "world.png"
 var _night := false
 var _market := false
+var _roost := false
+var _sheet := false
 var _game: Node3D = null
 var _switched := false
 
@@ -19,6 +21,11 @@ func _initialize() -> void:
 			_night = true
 		elif a == "--market":
 			_market = true
+		elif a == "--roost":
+			_roost = true
+		elif a == "--sheet":
+			_roost = true
+			_sheet = true
 	root.size = Vector2i(1600, 900)
 	var packed: PackedScene = load("res://scenes/main.tscn")
 	_game = packed.instantiate()
@@ -35,6 +42,18 @@ func _process(_d: float) -> bool:
 		_game.phase_t = 0.999
 	if _market and _frames == 70 and _game.has_method("open_market"):
 		_game.open_market()
+	if _roost and _frames == 70 and _game.has_method("open_coop"):
+		_game.coins = 9999
+		# put one bird partway up a class so the sheet has something to show
+		if _sheet and _game.chickens.size() > 0:
+			var b = _game.chickens[0]
+			_game.promote(b, "mage")
+			for i in 6:
+				_game.buy_track(b, "damage")
+		_game.open_coop()
+		if _sheet:
+			_game.coop_sel = 0
+			_game.ui.coop_refresh()
 	if _frames < 150:
 		return false
 	var img := root.get_texture().get_image()
