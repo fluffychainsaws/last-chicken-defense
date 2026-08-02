@@ -146,10 +146,19 @@ func _setup_input() -> void:
 
 func _build_environment() -> void:
 	env = Environment.new()
-	var sky_mat := PhysicalSkyMaterial.new()
-	sky_mat.sun_disk_scale = 3.0
+	# PhysicalSkyMaterial renders pure black under gl_compatibility, which is what
+	# browsers get — so the web build was drawing a black void behind everything,
+	# and the depth fog had no horizon to blend into. ProceduralSkyMaterial works
+	# on both, so web takes that.
 	var sky := Sky.new()
-	sky.sky_material = sky_mat
+	if is_web:
+		var proc := ProceduralSkyMaterial.new()
+		proc.sun_angle_max = 12.0
+		sky.sky_material = proc
+	else:
+		var sky_mat := PhysicalSkyMaterial.new()
+		sky_mat.sun_disk_scale = 3.0
+		sky.sky_material = sky_mat
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
@@ -189,10 +198,18 @@ func _build_environment() -> void:
 	env.ssil_enabled = not is_web
 	env.ssil_intensity = 0.9
 	env.ssil_radius = 3.0
+	# Depth haze is most of what gives an outdoor scene a sense of scale — the
+	# treeline reading as far away rather than as small. The old density was thin
+	# enough to be invisible past the fence.
 	env.fog_enabled = true
-	env.fog_density = 0.0006
-	env.fog_aerial_perspective = 0.7
+	env.fog_density = 0.0026
+	env.fog_aerial_perspective = 0.9
+	env.fog_sun_scatter = 0.22
 	env.fog_sky_affect = 0.0
+	# a shallow ground layer, so mist pools in the yard at dawn
+	env.fog_height = 3.0
+	env.fog_height_density = 0.018
+	_apply_grade(false)
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
@@ -1017,6 +1034,42 @@ func close_market() -> void:
 
 # ---------------- environment / clock ----------------
 
+## Colour grading. Lights set what the scene *is*; the grade sets how it reads,
+## and no amount of light tuning substitutes for it — a warm cast over a whole
+## frame is a grade, not a lamp.
+##
+## Two of them, because the game is two games. Day is warm and slightly lifted;
+## night is cold, desaturated and crushed. The 1D ramp maps luminance to colour,
+## which is what splits the tone: cool shadows against warm highlights by day,
+## and the reverse after dark.
+static var _grade_day: GradientTexture1D = null
+static var _grade_night: GradientTexture1D = null
+
+static func _ramp(shadow: Color, mid: Color, high: Color) -> GradientTexture1D:
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 0.5, 1.0])
+	g.colors = PackedColorArray([shadow, mid, high])
+	var t := GradientTexture1D.new()
+	t.gradient = g
+	t.width = 256
+	return t
+
+func _apply_grade(night: bool) -> void:
+	if _grade_day == null:
+		_grade_day = _ramp(Color(0.05, 0.07, 0.10), Color(0.52, 0.51, 0.45), Color(1.0, 0.97, 0.86))
+		_grade_night = _ramp(Color(0.015, 0.02, 0.05), Color(0.34, 0.39, 0.50), Color(0.86, 0.92, 1.0))
+	env.adjustment_enabled = true
+	if night:
+		env.adjustment_brightness = 0.94
+		env.adjustment_contrast = 1.18
+		env.adjustment_saturation = 0.72
+		env.adjustment_color_correction = _grade_night
+	else:
+		env.adjustment_brightness = 1.02
+		env.adjustment_contrast = 1.07
+		env.adjustment_saturation = 1.14
+		env.adjustment_color_correction = _grade_day
+
 func _update_environment() -> void:
 	if is_night:
 		var boss: bool = night_theme.get("boss", false)
@@ -1027,6 +1080,7 @@ func _update_environment() -> void:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		env.ambient_light_color = Color(0.28, 0.1, 0.12) if boss else Color(0.12, 0.15, 0.25)
 		env.ambient_light_energy = 0.5
+		_apply_grade(true)
 		if is_web:
 			# no volumetric fog in gl_compatibility; fall back to depth fog
 			env.fog_enabled = true
@@ -1047,10 +1101,11 @@ func _update_environment() -> void:
 		moonlight.light_energy = 0.0
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 		env.ambient_light_energy = lerpf(0.6, 1.0, elev)
+		_apply_grade(false)
 		if not is_web:
 			env.volumetric_fog_enabled = false
 		env.fog_enabled = true
-		env.fog_density = 0.0006
+		env.fog_density = 0.0026
 		env.fog_light_color = Color(0.7, 0.8, 0.95)
 	if window_mat != null:
 		window_mat.emission_energy_multiplier = 2.2 if is_night else 0.15
