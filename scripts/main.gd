@@ -15,6 +15,9 @@ const DAY_LEN := 170.0
 const NIGHT_LEN := 115.0
 const SAVE_PATH := "user://armaeggin_save.json"
 const MAX_CHICKENS := 24
+## TESTING: a full purse so the coop upgrade trees can be exercised without
+## grinding eggs first. Drop this back to 25 before shipping.
+const STARTING_COINS := 3000
 
 const YARD := {"min_x": -30.0, "max_x": 30.0, "min_z": -20.0, "max_z": 20.0}
 const GATE_HALF := 3.0
@@ -71,7 +74,7 @@ var egg_pickups: Array = []
 var feed_piles: Array = []
 var tree_spots: Array = []
 
-var coins := 25
+var coins := STARTING_COINS
 var eggs := 0
 var feed := 5
 var shells := 0
@@ -1402,7 +1405,7 @@ func _load_game() -> void:
 	if data == null:
 		start_new()
 		return
-	coins = int(data.get("coins", 25))
+	coins = int(data.get("coins", STARTING_COINS))
 	day_num = int(data.get("day", 1))
 	eggs = int(data.get("eggs", 0))
 	feed = int(data.get("feed", 5))
