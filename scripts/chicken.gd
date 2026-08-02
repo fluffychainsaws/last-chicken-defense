@@ -2,6 +2,7 @@ extends Node3D
 ## One chicken. Wanders and forages by day, garrisons the Armory (or fights) by night.
 
 const MK = preload("res://scripts/meshkit.gd")
+const CL = preload("res://scripts/classes.gd")
 
 var game: Node3D
 var hp := 25.0
@@ -25,6 +26,13 @@ var _helmet: MeshInstance3D = null
 ## A guard post, held for several seconds at a time. Re-rolling a destination on
 ## every single frame is what made helmeted hens vibrate in the coop doorway.
 var _post := Vector3.ZERO
+## Class, specialisation and the points poured into each track. Stats are
+## derived from those three and cached, since they change only on purchase.
+var class_id := "hen"
+var spec_id := ""
+var tracks := {}
+var stats := {}
+var _gear: Array = []
 var _legs: Array = []
 var _stride := 0.0
 var _head_base_z := 0.22
@@ -110,11 +118,57 @@ func apply_helmet() -> void:
 	if _helmet != null or _head == null:
 		return
 	_helmet = MK.cyl(_head, 0.14, 0.18, 0.1, Color(0.35, 0.4, 0.35), Vector3(0, 0.14, 0))
+	_rebuild_gear()
+
+## Recomputes stats and re-skins the bird. Called on every purchase.
+func refresh_class() -> void:
+	if tracks.is_empty():
+		tracks = CL.new_tracks()
+	stats = CL.stats(class_id, spec_id, tracks)
+	var was_full: bool = hp >= max_hp - 0.01
+	max_hp = stats["hp"] * (0.45 if is_chick else 1.0)
+	hp = max_hp if was_full else minf(hp, max_hp)
+	if _body_mat != null and class_id != "hen":
+		_body_mat.albedo_color = stats["colour"]
+	_rebuild_gear()
+
+func title() -> String:
+	return CL.title(class_id, spec_id, tracks)
+
+## Class kit, worn only at night alongside the helmet. Rebuilt from scratch
+## rather than patched, so a promotion can't leave the old class's gear on.
+func _rebuild_gear() -> void:
+	for g in _gear:
+		if is_instance_valid(g):
+			g.queue_free()
+	_gear.clear()
+	if _helmet == null:
+		return
+	var c: Color = stats.get("shot_colour", Color.WHITE)
+	match class_id:
+		"battle":
+			_gear.append(MK.box(self, Vector3(0.06, 0.34, 0.05), Color(0.7, 0.7, 0.74), Vector3(0.24, 0.3, 0.1)))
+		"archer":
+			var bow := MK.cyl(self, 0.02, 0.02, 0.44, Color(0.42, 0.3, 0.16), Vector3(0.24, 0.3, 0.06))
+			bow.rotation.z = deg_to_rad(18)
+			_gear.append(bow)
+		"mage":
+			_gear.append(MK.cyl(self, 0.018, 0.022, 0.5, Color(0.35, 0.26, 0.18), Vector3(0.24, 0.3, 0.06)))
+			_gear.append(MK.sphere(self, 0.06, c, Vector3(0.24, 0.58, 0.06), true, 2.2))
+		"knight":
+			_gear.append(MK.box(self, Vector3(0.22, 0.26, 0.04), Color(0.66, 0.68, 0.74), Vector3(-0.24, 0.28, 0.12)))
+			_gear.append(MK.box(self, Vector3(0.05, 0.3, 0.05), Color(0.75, 0.76, 0.8), Vector3(0.24, 0.32, 0.08)))
+		"military":
+			_gear.append(MK.box(self, Vector3(0.05, 0.05, 0.5), Color(0.22, 0.22, 0.2), Vector3(0.2, 0.3, 0.16)))
 
 func remove_helmet() -> void:
 	if _helmet != null:
 		_helmet.queue_free()
 		_helmet = null
+	for g in _gear:
+		if is_instance_valid(g):
+			g.queue_free()
+	_gear.clear()
 
 ## Somewhere near the coop to stand watch, held until the timer runs out.
 func _pick_post() -> void:
@@ -192,8 +246,11 @@ func tick(delta: float) -> void:
 			# fetch the gear from the coop, then take up a post outside it
 			if _walk_toward(game.coop_door, 3.2, delta):
 				apply_helmet()
-				_pick_post()
-				state = "guard"
+				if bool(stats.get("perch", false)):
+					state = "perch"
+				else:
+					_pick_post()
+					state = "guard"
 		"to_stow":
 			# the night's gear goes back in the coop before the day resumes
 			if _walk_toward(game.coop_door, 2.6, delta):
@@ -203,17 +260,19 @@ func tick(delta: float) -> void:
 					state = "forage_go"
 				else:
 					state = "wander"
+		"perch":
+			# the military hen fights from the coop roof and never comes down
+			position = position.lerp(game.coop_pos + Vector3(0, 3.1, 0), delta * 2.0)
+			_fire_at(game.nearest_enemy(position, float(stats.get("range", 12.0))), delta)
 		"guard":
-			# a wider notice radius than the old 3.2, which was short enough that
-			# they lunged at something and immediately lost interest in it
-			var enemy = game.nearest_enemy(position, 6.0)
+			var reach: float = float(stats.get("range", 1.6))
+			# search well past reach, so melee birds actually close the gap
+			var enemy = game.nearest_enemy(position, maxf(reach, 6.0))
 			if enemy != null:
-				_walk_toward(enemy.position, 2.6, delta)
+				if not bool(stats.get("ranged", false)):
+					_walk_toward(enemy.position, 2.6 * float(stats.get("speed", 1.0)), delta)
 				_head.rotation.x = maxf(0.0, sin(_peck_t * 10.0)) * 1.2
-				if _attack_cd <= 0.0 and position.distance_to(enemy.position) < 1.6:
-					_attack_cd = 0.8
-					enemy.damage(4.0)
-					game.sfx.cluck(-8.0)
+				_fire_at(enemy, delta)
 			else:
 				if _timer <= 0.0 or _post == Vector3.ZERO:
 					_pick_post()
@@ -224,6 +283,21 @@ func tick(delta: float) -> void:
 				_timer = randf_range(0.5, 1.2)
 				game.sfx.cluck(-6.0)
 			_walk_toward(_target, 4.2, delta)
+
+## One attack path for every class. Melee needs contact; ranged only needs to
+## be in reach, and hands off to the game's projectile pool.
+func _fire_at(enemy, _delta: float) -> void:
+	if enemy == null or _attack_cd > 0.0:
+		return
+	if position.distance_to(enemy.position) > float(stats.get("range", 1.6)):
+		return
+	_attack_cd = float(stats.get("cd", 0.8))
+	var dmg: float = float(stats.get("dmg", 4.0))
+	if bool(stats.get("ranged", false)):
+		game.hen_shot(self, enemy, dmg, stats)
+	else:
+		enemy.damage(dmg)
+		game.sfx.cluck(-8.0)
 
 func start_forage() -> void:
 	forager = true
@@ -244,6 +318,7 @@ func night_mode() -> void:
 
 func day_mode() -> void:
 	visible = true
+	position.y = 0.0
 	hp = minf(max_hp, hp + 5.0)
 	_post = Vector3.ZERO
 	if _helmet != null:
@@ -294,7 +369,10 @@ func _settle_legs(delta: float) -> void:
 		_head.position.z = lerpf(_head.position.z, _head_base_z, delta * 8.0)
 
 func damage(n: float) -> void:
-	hp -= n
+	if randf() < float(stats.get("dodge", 0.0)):
+		game.spawn_poof(position + Vector3(0, 0.5, 0), Color(0.9, 0.9, 1.0), 3)
+		return
+	hp -= n * (1.0 - float(stats.get("armor", 0.0)))
 	if _body_mat != null:
 		# energy only — toggling the feature recompiles the shader mid-fight
 		_body_mat.emission = Color(1, 0.3, 0.3)

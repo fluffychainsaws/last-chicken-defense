@@ -9,6 +9,7 @@ const EnemyScript = preload("res://scripts/enemy.gd")
 const PlayerScript = preload("res://scripts/player.gd")
 const UIScript = preload("res://scripts/game_ui.gd")
 const SfxScript = preload("res://scripts/sfx.gd")
+const CL = preload("res://scripts/classes.gd")
 
 const DAY_LEN := 170.0
 const NIGHT_LEN := 115.0
@@ -100,6 +101,9 @@ var started := false
 var paused := true
 var over := false
 var market_open := false
+var coop_open := false
+## Which bird the coop screen is currently showing. -1 is the roster list.
+var coop_sel := -1
 var spawn_dist := 62.0
 var _spawn_left := 0
 var _spawn_timer := 0.0
@@ -508,6 +512,8 @@ func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		if market_open:
 			close_market()
+			if coop_open:
+				close_coop()
 		elif started and not over:
 			if paused:
 				unpause()
@@ -702,15 +708,47 @@ func _update_turret(delta: float) -> void:
 		_turret_cd = 1.1
 		turret_fire(target)
 
+## A shot from a ranged hen. Damage and any splash ride along on the
+## projectile, so one pooled update handles arrows, bolts and every element a
+## mage can throw without a branch per class.
+func hen_shot(from: Node3D, target: Node3D, dmg: float, st: Dictionary) -> void:
+	var head: Vector3 = from.position + Vector3(0, 0.55, 0)
+	var aim: Vector3 = (target.position + Vector3(0, 0.8, 0) - head).normalized()
+	var shots: int = maxi(int(st.get("shots", 1)), 1)
+	for i in shots:
+		var spread := Vector3.ZERO
+		if shots > 1:
+			spread = Vector3(randf_range(-0.12, 0.12), randf_range(-0.05, 0.05), randf_range(-0.12, 0.12))
+		var col: Color = st.get("shot_colour", Color(0.95, 0.95, 0.8))
+		var m := MK.add_mesh(self, MK.sphere_mesh(0.09, 8, 4), col, head + aim * 0.6, true, 1.6)
+		projectiles.append({
+			"node": m, "vel": (aim + spread).normalized() * 26.0, "kind": "hen",
+			"life": 2.0, "dmg": dmg, "splash": float(st.get("splash", 0.0)),
+			"colour": col, "burn": bool(st.get("burn", false)),
+		})
+	sfx.play("egg", -14.0)
+
 func _update_projectiles(delta: float) -> void:
 	for pr in projectiles.duplicate():
 		pr.life -= delta
-		if pr.kind != "turret":
+		if pr.kind != "turret" and pr.kind != "hen":
 			pr.vel.y -= 20.0 * delta
 		pr.node.position += pr.vel * delta
 		var done := false
 		var hit = nearest_enemy(pr.node.position, 0.9)
 		match pr.kind:
+			"hen":
+				if hit != null:
+					if pr.splash > 0.0:
+						for e in enemies.duplicate():
+							if e.position.distance_to(pr.node.position) < pr.splash:
+								e.damage(pr.dmg)
+					else:
+						hit.damage(pr.dmg)
+					if pr.burn:
+						hit.ignite()
+					spawn_poof(pr.node.position, pr.colour, 4)
+					done = true
 			"turret":
 				if hit != null:
 					hit.damage(25.0)
@@ -841,6 +879,7 @@ func _spawn_chicken(pos: Vector3, chick: bool) -> void:
 	var c = ChickenScript.new()
 	add_child(c)
 	c.setup(self, pos, chick)
+	c.refresh_class()
 	chickens.append(c)
 
 func _spawn_rooster(pos: Vector3) -> void:
@@ -849,7 +888,9 @@ func _spawn_rooster(pos: Vector3) -> void:
 	r.setup(self, pos)
 	# stagger perches along the coop ridge so multiple roosters don't overlap
 	var i := roosters.size()
-	r.perch = Vector3(20.0 + (float(i) - 0.5) * 1.1, 3.15, -12.0)
+	# derived from coop_pos — this was still pointing at the coop's old corner
+	r.perch = coop_pos + Vector3((float(i) - 0.5) * 1.1, 3.15, 0)
+	r.refresh_class()
 	roosters.append(r)
 
 func chicken_died(c: Node3D) -> void:
@@ -1048,6 +1089,70 @@ func sleep_until_night() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	sleeping = false
 
+# ---------------- coop upgrades ----------------
+
+## Everything purchasable at the coop goes through here so one place owns the
+## "can you afford it" check, the deduction and the UI refresh.
+func _spend(cost: int) -> bool:
+	if coins < cost:
+		sfx.play("denied", -6.0)
+		return false
+	coins -= cost
+	sfx.play("buy", -6.0)
+	ui.refresh()
+	ui.coop_refresh()
+	return true
+
+func birds() -> Array:
+	var a: Array = []
+	a.append_array(chickens)
+	a.append_array(roosters)
+	return a
+
+func promote(bird, class_id: String) -> void:
+	var price: int = int(CL.CLASSES[class_id]["price"])
+	if bird.class_id != "hen" or not _spend(price):
+		return
+	bird.class_id = class_id
+	bird.spec_id = ""
+	bird.refresh_class()
+
+## Specialisations cost a flat premium and are permanent — the point of the
+## choice is that it closes the others off.
+const SPEC_PRICE := 220
+
+func specialise(bird, spec_id: String) -> void:
+	if bird.spec_id != "" or not CL.can_spec(bird.tracks):
+		return
+	if not _spend(SPEC_PRICE):
+		return
+	bird.spec_id = spec_id
+	bird.refresh_class()
+
+func buy_track(bird, track: String) -> void:
+	var owned: int = int(bird.tracks.get(track, 0))
+	if owned >= int(CL.TRACKS[track]["max"]):
+		return
+	if not _spend(CL.track_cost(track, owned)):
+		return
+	bird.tracks[track] = owned + 1
+	bird.refresh_class()
+
+func open_coop() -> void:
+	if over or is_night:
+		return
+	coop_open = true
+	coop_sel = -1
+	paused = true
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	ui.open_coop()
+
+func close_coop() -> void:
+	coop_open = false
+	ui.close_coop()
+	paused = false
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+
 func open_market() -> void:
 	if over:
 		return
@@ -1175,9 +1280,17 @@ func _save_game() -> void:
 	var hens := 0
 	for c in chickens:
 		hens += 1
+	# progression is per bird, so the roster is stored, not just a count
+	var flock := []
+	for c in chickens:
+		flock.append({"class": c.class_id, "spec": c.spec_id, "tracks": c.tracks})
+	var crew := []
+	for r in roosters:
+		crew.append({"class": "rooster", "spec": r.spec_id, "tracks": r.tracks})
 	var data := {
 		"coins": coins, "day": day_num, "eggs": eggs, "feed": feed, "shells": shells,
 		"hens": hens, "roosters": roosters.size(), "coop_hp": coop_hp, "upgrades": upgrades,
+	"flock": flock, "crew": crew,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	f.store_string(JSON.stringify(data))
@@ -1210,6 +1323,27 @@ func _load_game() -> void:
 		_spawn_chicken(rand_in_yard(), false)
 	for i in int(data.get("roosters", 1 if upgrades.rooster else 0)):
 		_spawn_rooster(rand_in_yard())
+	_restore_progression(chickens, data.get("flock", []))
+	_restore_progression(roosters, data.get("crew", []))
+
+## Saved rosters are matched to spawned birds by index. A shorter list leaves
+## the remainder as fresh recruits, which is what a grown flock should do.
+func _restore_progression(birds: Array, saved) -> void:
+	if not (saved is Array):
+		return
+	for i in mini(birds.size(), saved.size()):
+		var row = saved[i]
+		if not (row is Dictionary):
+			continue
+		birds[i].class_id = str(row.get("class", birds[i].class_id))
+		birds[i].spec_id = str(row.get("spec", ""))
+		var tr = row.get("tracks", {})
+		if tr is Dictionary:
+			var clean := CL.new_tracks()
+			for k in clean:
+				clean[k] = int(tr.get(k, 0))
+			birds[i].tracks = clean
+		birds[i].refresh_class()
 
 # ---------------- automated screenshot test ----------------
 

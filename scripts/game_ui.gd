@@ -17,6 +17,8 @@ var _night_shade: ColorRect
 var _fade: ColorRect
 var _market_panel: PanelContainer
 var _market_body: VBoxContainer
+var _coop_panel: PanelContainer
+var _coop_body: VBoxContainer
 var _overlay: Control
 var _crosshair: Label
 
@@ -67,6 +69,7 @@ func setup(g: Node3D) -> void:
 	_build_fx()
 	_build_hud()
 	_build_market()
+	_build_coop()
 	_overlay = Control.new()
 	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -312,6 +315,161 @@ func night_fx(on: bool, boss := false) -> void:
 	var col := Color(0.25, 0.02, 0.05) if boss else Color(0.02, 0.02, 0.1)
 	_night_shade.color = Color(col.r, col.g, col.b, _night_shade.color.a)
 	tw.tween_property(_night_shade, "color:a", target, 2.0)
+
+# ---------- Coop upgrades ----------
+
+const CL = preload("res://scripts/classes.gd")
+
+func _build_coop() -> void:
+	_coop_panel = PanelContainer.new()
+	_coop_panel.anchor_left = 0.5
+	_coop_panel.anchor_right = 0.5
+	_coop_panel.anchor_top = 0.5
+	_coop_panel.anchor_bottom = 0.5
+	_coop_panel.offset_left = -430
+	_coop_panel.offset_right = 430
+	_coop_panel.offset_top = -310
+	_coop_panel.offset_bottom = 310
+	_coop_panel.custom_minimum_size = Vector2(860, 620)
+	_coop_panel.visible = false
+	add_child(_coop_panel)
+	_coop_body = VBoxContainer.new()
+	_coop_body.add_theme_constant_override("separation", 6)
+	_coop_panel.add_child(_coop_body)
+
+func open_coop() -> void:
+	_coop_panel.visible = true
+	_render_coop()
+
+func close_coop() -> void:
+	_coop_panel.visible = false
+
+func coop_refresh() -> void:
+	if _coop_panel != null and _coop_panel.visible:
+		_render_coop()
+
+## Two views in one panel: the roster, and one bird's sheet. game.coop_sel of -1
+## means the roster; anything else indexes game.birds().
+func _render_coop() -> void:
+	_clear(_coop_body)
+	var t := _label(_coop_body, "THE ROOST", 32, Color(1, 0.85, 0.45))
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_label(_coop_body, "training, tempering and terrible ideas  -  you have $ %d" % game.coins, 15, Color(0.8, 0.8, 0.72))
+	var flock: Array = game.birds()
+	if game.coop_sel < 0 or game.coop_sel >= flock.size():
+		_render_roster(flock)
+	else:
+		_render_sheet(flock[game.coop_sel])
+	var close := Button.new()
+	close.text = "CLOSE  [ESC]"
+	close.pressed.connect(func(): game.close_coop())
+	_coop_body.add_child(close)
+
+func _render_roster(flock: Array) -> void:
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(820, 440)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_coop_body.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.custom_minimum_size.x = 790
+	list.add_theme_constant_override("separation", 4)
+	scroll.add_child(list)
+	for i in flock.size():
+		var b = flock[i]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		list.add_child(row)
+		var col := VBoxContainer.new()
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		col.custom_minimum_size.x = 600
+		row.add_child(col)
+		_label(col, b.title(), 18, Color(1, 0.95, 0.8))
+		var lv: int = CL.level(b.tracks)
+		_label(col, "level %d  -  %d hp  -  %d points spent" % [lv, int(b.max_hp), CL.points_spent(b.tracks)], 13, Color(0.66, 0.7, 0.66))
+		var open := Button.new()
+		open.text = "TRAIN"
+		open.custom_minimum_size = Vector2(120, 0)
+		var idx := i
+		open.pressed.connect(func():
+			game.coop_sel = idx
+			_render_coop())
+		row.add_child(open)
+
+func _render_sheet(b) -> void:
+	var back := Button.new()
+	back.text = "< BACK TO THE ROOST"
+	back.pressed.connect(func():
+		game.coop_sel = -1
+		_render_coop())
+	_coop_body.add_child(back)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(820, 400)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_coop_body.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.custom_minimum_size.x = 790
+	list.add_theme_constant_override("separation", 4)
+	scroll.add_child(list)
+
+	_label(list, b.title(), 22, Color(1, 0.9, 0.6))
+	var st: Dictionary = b.stats
+	_label(list, "dmg %.1f  -  reach %.1f  -  every %.2fs  -  %d hp  -  %d%% armor  -  %d%% dodge" % [
+		st.get("dmg", 0.0), st.get("range", 0.0), st.get("cd", 0.0), int(st.get("hp", 0.0)),
+		int(st.get("armor", 0.0) * 100.0), int(st.get("dodge", 0.0) * 100.0)], 14, Color(0.7, 0.78, 0.7))
+
+	# promotion is only ever offered to a plain hen
+	if b.class_id == "hen":
+		_label(list, "", 10)
+		_label(list, "PROMOTE", 18, Color(0.9, 0.8, 0.5))
+		for cid in CL.CLASSES:
+			if cid == "hen":
+				continue
+			var info: Dictionary = CL.CLASSES[cid]
+			_offer(list, info["name"], info["desc"], int(info["price"]),
+				func(): game.promote(b, cid))
+	elif b.spec_id == "":
+		_label(list, "", 10)
+		var ready: bool = CL.can_spec(b.tracks)
+		_label(list, "SPECIALISE" if ready else "SPECIALISE  (needs %d points spent)" % CL.SPEC_AT, 18, Color(0.9, 0.8, 0.5))
+		if ready:
+			for sid in CL.specs_of(b.class_id):
+				var sp: Dictionary = CL.specs_of(b.class_id)[sid]
+				_offer(list, sp["name"], sp["desc"], game.SPEC_PRICE,
+					func(): game.specialise(b, sid))
+
+	_label(list, "", 10)
+	_label(list, "TRAINING", 18, Color(0.9, 0.8, 0.5))
+	for tr in CL.TRACK_ORDER:
+		var info: Dictionary = CL.TRACKS[tr]
+		var owned: int = int(b.tracks.get(tr, 0))
+		var maxed: bool = owned >= int(info["max"])
+		var label := "%s  %d/%d" % [info["name"], owned, int(info["max"])]
+		_offer(list, label, info["desc"], -1 if maxed else CL.track_cost(tr, owned),
+			func(): game.buy_track(b, tr))
+
+## One purchasable row. A price of -1 renders as MAXED and is not clickable.
+func _offer(list: Node, name_text: String, desc_text: String, price: int, on_buy: Callable) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	list.add_child(row)
+	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.custom_minimum_size.x = 560
+	row.add_child(col)
+	_label(col, name_text, 17, Color(1, 0.95, 0.8))
+	var d := _label(col, desc_text, 13, Color(0.65, 0.7, 0.65))
+	d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	d.custom_minimum_size.x = 560
+	var btn := Button.new()
+	if price < 0:
+		btn.text = "MAXED"
+		btn.disabled = true
+	else:
+		btn.text = "$ %d" % price
+		btn.disabled = game.coins < price
+		btn.pressed.connect(on_buy)
+	btn.custom_minimum_size = Vector2(120, 0)
+	row.add_child(btn)
 
 # ---------- Farmers Market ----------
 
