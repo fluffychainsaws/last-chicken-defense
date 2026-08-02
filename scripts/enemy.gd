@@ -81,6 +81,9 @@ func _build_mesh() -> void:
 	if theme.get("id", "") == "dragon":
 		_build_dragon()
 		return
+	if theme.get("id", "") == "midget":
+		_build_midget()
+		return
 	var s: float = body_scale
 	var body_c: Color = theme["body"]
 	var eye_c: Color = theme["eye"]
@@ -294,6 +297,225 @@ func _build_goblin_procedural(s: float) -> void:
 			var tuft := MK.cyl(head, 0.0, 0.035 * s, randf_range(0.14, 0.26) * s, hair_c, Vector3(randf_range(-0.1, 0.1) * s, 0.24 * s, randf_range(-0.12, 0.04) * s))
 			tuft.rotation.x = randf_range(-0.5, 0.2)
 			tuft.rotation.z = randf_range(-0.5, 0.5)
+
+## Skin maps are identical across the whole wave, so build them once. The
+## materials that use them stay per-instance — a shared material would make one
+## midget taking a shotgun blast flash every other midget on the map.
+static var _midget_tex: Texture2D = null
+static var _midget_norm: Texture2D = null
+
+static func _midget_skin() -> Array:
+	if _midget_tex == null:
+		# low frequency = broad blotchy mottling; the normal runs finer for warts
+		_midget_tex = MK.noise_tex(7717, 0.05, 4, false, 0.55)
+		_midget_norm = MK.noise_tex(4242, 0.16, 4, true)
+	return [_midget_tex, _midget_norm]
+
+## Furious midget people: squat, greasy, mostly eyes and teeth. Built as a
+## bottom-heavy lump — no neck, tiny arms, stubby legs — so the silhouette reads
+## as a fat little monster rather than a shrunken person. Colour, horns, spikes,
+## warts and wonky eye sizes all roll per individual so a wave of thirty doesn't
+## look like one model stamped thirty times.
+func _build_midget() -> void:
+	body_scale *= randf_range(0.82, 1.22)
+	var s: float = body_scale
+	# runts scurry, the bloated ones waddle
+	spd *= lerpf(1.18, 0.85, clampf((s / float(theme["scale"]) - 0.82) / 0.4, 0.0, 1.0))
+	# A late wave is ~30 of these at once. Each one is its own pile of draw calls,
+	# so the browser build drops the pea-sized details that cost a call apiece and
+	# read as nothing at gameplay distance.
+	var detail := not OS.has_feature("web")
+
+	var hides := [
+		Color(0.34, 0.50, 0.42), Color(0.28, 0.42, 0.48), Color(0.46, 0.48, 0.30),
+		Color(0.50, 0.38, 0.28), Color(0.38, 0.34, 0.44), Color(0.53, 0.50, 0.36),
+	]
+	var hide: Color = hides[randi() % hides.size()]
+	var horn_c := Color(0.80, 0.74, 0.58)
+	var tooth_c := Color(0.94, 0.91, 0.79)
+	var irises := [
+		Color(0.95, 0.78, 0.15), Color(0.55, 0.85, 0.30),
+		Color(0.35, 0.75, 0.95), Color(0.95, 0.55, 0.15),
+	]
+	var iris_c: Color = irises[randi() % irises.size()]
+
+	var maps := _midget_skin()
+	var skin := MK.oily_mat(hide, maps[0], maps[1], 2.2)
+	var belly := MK.oily_mat(hide.lightened(0.28), maps[0], maps[1], 2.6)
+	# horn and claw keratin: still wet-looking, but harder and less mottled
+	var keratin := MK.oily_mat(horn_c, null, null, 1.0, 0.22)
+	_mats.append(skin)
+	_mats.append(belly)
+	_mats.append(keratin)
+
+	# --- legs: short, thick, splayed out under the gut ---
+	for side in [-1.0, 1.0]:
+		var hip := Node3D.new()
+		hip.position = Vector3(side * 0.22 * s, 0.42 * s, 0)
+		add_child(hip)
+		_legs.append(hip)
+		var thigh := MK.skinned(hip, MK.sphere_mesh(0.17 * s), skin, Vector3(0, -0.12 * s, 0))
+		thigh.scale = Vector3(1.0, 1.25, 1.0)
+		MK.skinned(hip, MK.sphere_mesh(0.13 * s), skin, Vector3(0, -0.32 * s, 0.01 * s))
+		# splayed three-toed foot
+		var foot := MK.skinned(hip, MK.sphere_mesh(0.15 * s), skin, Vector3(0, -0.42 * s, 0.05 * s))
+		foot.scale = Vector3(1.1, 0.55, 1.35)
+		if detail:
+			for t in 3:
+				var claw := MK.skinned(hip, MK.cone_mesh(0.035 * s, 0.11 * s), keratin,
+					Vector3((float(t) - 1.0) * 0.075 * s, -0.44 * s, 0.19 * s))
+				claw.rotation.x = deg_to_rad(72)
+
+	# --- body: one big pear, widest low, leaning back over the legs ---
+	var torso := Node3D.new()
+	torso.position = Vector3(0, 0.5 * s, 0)
+	torso.rotation.x = deg_to_rad(-7)
+	add_child(torso)
+	var gut := MK.skinned(torso, MK.sphere_mesh(0.44 * s, 24, 12), skin, Vector3(0, 0.34 * s, 0))
+	gut.scale = Vector3(1.06, 0.98, 0.92)
+	var chest := MK.skinned(torso, MK.sphere_mesh(0.36 * s, 24, 12), skin, Vector3(0, 0.66 * s, 0.02 * s))
+	chest.scale = Vector3(1.0, 0.86, 0.9)
+	# pale underbelly, pushed forward so it catches light separately from the back
+	var paunch := MK.skinned(torso, MK.sphere_mesh(0.34 * s, 24, 12), belly, Vector3(0, 0.3 * s, 0.16 * s))
+	paunch.scale = Vector3(0.96, 1.0, 0.72)
+
+	# --- warts: scattered lumps that break up the silhouette ---
+	# sampled on the gut ellipsoid itself, so they sit in the skin rather than
+	# hovering off it
+	for i in (randi_range(6, 11) if detail else 0):
+		var dir := Vector3(randf_range(-1.0, 1.0), randf_range(-0.7, 1.0), randf_range(-1.0, 1.0)).normalized()
+		var on_gut := Vector3(0, 0.34 * s, 0) + Vector3(dir.x * 1.06, dir.y * 0.98, dir.z * 0.92) * 0.42 * s
+		var wart := MK.skinned(torso, MK.sphere_mesh(randf_range(0.02, 0.045) * s), skin, on_gut)
+		wart.scale = Vector3(1.0, 0.7, 1.0)
+
+	# --- back spines ---
+	if randf() < 0.75:
+		for i in randi_range(3, 5):
+			var t := float(i) / 4.0
+			var spike := MK.skinned(torso, MK.cone_mesh(0.045 * s, randf_range(0.12, 0.2) * s), keratin,
+				Vector3(0, (0.28 + t * 0.42) * s, (-0.36 + t * 0.1) * s))
+			spike.rotation.x = deg_to_rad(-28)
+
+	# --- arms: stubby, hanging off the sides of the gut ---
+	var hands := []
+	for side in [-1.0, 1.0]:
+		var sh := Node3D.new()
+		# swung out and forward, clear of the gut, or the arms vanish behind it
+		sh.position = Vector3(side * 0.44 * s, 0.62 * s, 0.08 * s)
+		sh.rotation.x = deg_to_rad(-30)
+		sh.rotation.z = deg_to_rad(-side * 40.0)
+		torso.add_child(sh)
+		MK.skinned(sh, MK.sphere_mesh(0.11 * s), skin, Vector3(0, -0.1 * s, 0)).scale = Vector3(1.0, 1.3, 1.0)
+		MK.skinned(sh, MK.sphere_mesh(0.085 * s), skin, Vector3(0, -0.27 * s, 0.02 * s))
+		var hand := Node3D.new()
+		hand.position = Vector3(0, -0.36 * s, 0.03 * s)
+		sh.add_child(hand)
+		MK.skinned(hand, MK.sphere_mesh(0.09 * s), skin, Vector3.ZERO)
+		if detail:
+			for f in 3:
+				var nail := MK.skinned(hand, MK.cone_mesh(0.022 * s, 0.08 * s), keratin,
+					Vector3((float(f) - 1.0) * 0.05 * s, -0.05 * s, 0.05 * s))
+				nail.rotation.x = deg_to_rad(150)
+		hands.append(hand)
+
+	# --- head: sunk into the shoulders, no neck ---
+	var head := Node3D.new()
+	head.position = Vector3(0, 0.92 * s, 0.03 * s)
+	head.rotation.x = deg_to_rad(7)  # counter the torso lean so it faces level
+	torso.add_child(head)
+	# skull radius drives every feature position below: anything meant to be seen
+	# has to sit at or beyond the surface, or it renders buried inside the head
+	var hr := 0.32 * s
+	var skull := MK.skinned(head, MK.sphere_mesh(hr, 24, 12), skin, Vector3.ZERO)
+	skull.scale = Vector3(1.1, 0.94, 1.0)
+	# heavy brow shelf, pulled back and up so it frames the eyes without hiding them
+	var brow := MK.skinned(head, MK.sphere_mesh(0.26 * s), skin, Vector3(0, 0.19 * s, 0.1 * s))
+	brow.scale = Vector3(1.18, 0.38, 0.92)
+
+	# --- eyes: enormous and bulging clear of the skull, glossy, mismatched ---
+	var eye_r := randf_range(0.15, 0.185) * s
+	var eye_white := MK.oily_mat(Color(0.93, 0.93, 0.88), null, null, 1.0, 0.06)
+	for side in [-1.0, 1.0]:
+		# a touch of asymmetry per eye keeps the face from reading as machined
+		var r := eye_r * randf_range(0.88, 1.12)
+		var ex: float = side * 0.155 * s
+		var ey := 0.03 * s
+		# centred near the surface so most of the ball stands proud of the face
+		var ez := hr * 0.72
+		MK.skinned(head, MK.sphere_mesh(r, 20, 10), eye_white, Vector3(ex, ey, ez))
+		var iris := MK.oily_mat(iris_c, null, null, 1.0, 0.05)
+		MK.skinned(head, MK.sphere_mesh(r * 0.58), iris, Vector3(ex, ey, ez + r * 0.6))
+		MK.add_mesh(head, MK.sphere_mesh(r * 0.28), Color(0.03, 0.02, 0.03),
+			Vector3(ex, ey, ez + r * 0.82))
+		# specular catchlight — the single cheapest cue that a surface is wet
+		if detail:
+			MK.add_mesh(head, MK.sphere_mesh(r * 0.13), Color(1, 1, 1),
+				Vector3(ex + r * 0.3, ey + r * 0.34, ez + r * 0.86), true, 2.4)
+		# heavy lid sliced across the top of the eyeball
+		var lid := MK.skinned(head, MK.sphere_mesh(r * 1.08), skin, Vector3(ex, ey + r * 0.62, ez - r * 0.1))
+		lid.scale = Vector3(1.0, 0.5, 1.0)
+
+	# --- mouth: a wide gash across the lower face, teeth standing proud of it ---
+	var my := -0.195 * s
+	# half-width of the skull at mouth height, so the maw lands on the surface
+	var mz := sqrt(maxf(hr * hr - my * my, 0.0))
+	# kept shallow in Z: a deep maw sphere bulges out past the teeth and eats them
+	var maw := MK.add_mesh(head, MK.sphere_mesh(0.23 * s), Color(0.30, 0.07, 0.10),
+		Vector3(0, my, mz * 0.75))
+	maw.scale = Vector3(1.3, 0.44, 0.4)
+	var n_teeth := randi_range(5, 7)
+	for i in n_teeth:
+		var tx := (float(i) - float(n_teeth - 1) * 0.5) * 0.082 * s
+		var jitter := randf_range(0.85, 1.4)
+		# teeth have to clear mz — the skull surface at mouth height — or they
+		# render inside the head. Upper fangs point down, lower ones up, and
+		# nothing lines up.
+		var upper := MK.skinned(head, MK.cone_mesh(0.032 * s, 0.115 * s * jitter), keratin,
+			Vector3(tx, my + 0.06 * s, mz * 1.15))
+		upper.rotation.x = deg_to_rad(180)
+		upper.rotation.z = deg_to_rad(randf_range(-10, 10))
+		if randf() < 0.75:
+			var lower := MK.skinned(head, MK.cone_mesh(0.027 * s, 0.09 * s * jitter), keratin,
+				Vector3(tx + 0.035 * s, my - 0.07 * s, mz * 1.13))
+			lower.rotation.z = deg_to_rad(randf_range(-10, 10))
+	# lower lip, kept small and low so it frames the teeth instead of hiding them
+	var lip := MK.skinned(head, MK.sphere_mesh(0.15 * s), belly, Vector3(0, my - 0.135 * s, mz * 0.72))
+	lip.scale = Vector3(1.2, 0.45, 0.5)
+
+	# --- horns: curved pair, or a crown of little spikes ---
+	if randf() < 0.7:
+		for side in [-1.0, 1.0]:
+			var base := Vector3(side * 0.17 * s, 0.24 * s, -0.02 * s)
+			# two tapering segments, the upper one kicked outward, reads as a curve
+			var h1 := MK.skinned(head, MK.cone_mesh(0.072 * s, 0.24 * s), keratin, base)
+			h1.rotation.z = deg_to_rad(-side * 18.0)
+			var h2 := MK.skinned(head, MK.cone_mesh(0.05 * s, 0.26 * s), keratin,
+				base + Vector3(side * 0.1 * s, 0.21 * s, 0))
+			h2.rotation.z = deg_to_rad(-side * 48.0)
+	else:
+		for i in randi_range(4, 6):
+			var ang := PI * (float(i) / 5.0) - PI * 0.5
+			var spike := MK.skinned(head, MK.cone_mesh(0.028 * s, randf_range(0.07, 0.13) * s), keratin,
+				Vector3(sin(ang) * 0.2 * s, 0.26 * s, cos(ang) * 0.12 * s - 0.02 * s))
+			spike.rotation.x = deg_to_rad(-14)
+
+	# --- the stick. it is their whole thing. ---
+	if theme.get("stick", false):
+		var wood := Color(0.34, 0.23, 0.13)
+		# a holder carries the tilt, so the shaft and its knots share one local
+		# axis — placing the knots in hand space leaves them floating in mid-air
+		var club := Node3D.new()
+		club.position = Vector3(0, -0.02 * s, 0.05 * s)
+		# raised and canted forward so the stick clears the body in silhouette
+		club.rotation.x = deg_to_rad(-58)
+		club.rotation.z = deg_to_rad(randf_range(-14, 14))
+		hands[1].add_child(club)
+		var length := randf_range(0.9, 1.2) * s
+		MK.cyl(club, 0.022 * s, 0.032 * s, length, wood, Vector3(0, length * 0.42, 0))
+		# knots and a heavier business end, so it reads as torn off a tree
+		MK.sphere(club, 0.055 * s, wood.darkened(0.1), Vector3(0, length * 0.9, 0))
+		if randf() < 0.5:
+			MK.sphere(club, 0.03 * s, wood.lightened(0.08), Vector3(0.02 * s, length * 0.6, 0))
 
 ## A proper dragon: serpentine neck, horned skull, membrane wings with finger
 ## struts, four clawed legs, spined back and a long spade-tipped tail.
