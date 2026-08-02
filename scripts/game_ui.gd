@@ -23,6 +23,44 @@ var _crosshair: Label
 const FONT_BIG := 42
 const FONT_MED := 20
 
+## One shared look for every control, instead of each panel inventing its own.
+## A CanvasLayer can't hold a theme, so it's pushed onto the direct Control
+## children after the tree is built and inherited down from there.
+const UI_INK := Color(0.93, 0.91, 0.85)
+const UI_PANEL := Color(0.07, 0.065, 0.055, 0.86)
+const UI_EDGE := Color(0.62, 0.55, 0.36, 0.55)
+const UI_ACCENT := Color(0.86, 0.72, 0.30)
+
+static func _box(bg: Color, edge: Color, radius := 8, border := 1) -> StyleBoxFlat:
+	var b := StyleBoxFlat.new()
+	b.bg_color = bg
+	b.set_corner_radius_all(radius)
+	b.set_border_width_all(border)
+	b.border_color = edge
+	b.content_margin_left = 14
+	b.content_margin_right = 14
+	b.content_margin_top = 7
+	b.content_margin_bottom = 7
+	return b
+
+func _build_theme() -> Theme:
+	var t := Theme.new()
+	t.default_font_size = FONT_MED
+	# buttons carry most of the interface's character — the market is all buttons
+	t.set_stylebox("normal", "Button", _box(Color(0.12, 0.11, 0.09, 0.92), UI_EDGE))
+	t.set_stylebox("hover", "Button", _box(Color(0.2, 0.18, 0.13, 0.95), UI_ACCENT))
+	t.set_stylebox("pressed", "Button", _box(Color(0.08, 0.075, 0.06, 0.98), UI_ACCENT))
+	t.set_stylebox("disabled", "Button", _box(Color(0.1, 0.1, 0.1, 0.55), Color(0.35, 0.33, 0.3, 0.35)))
+	t.set_stylebox("focus", "Button", _box(Color(0, 0, 0, 0), UI_ACCENT))
+	t.set_color("font_color", "Button", UI_INK)
+	t.set_color("font_hover_color", "Button", Color(1.0, 0.95, 0.78))
+	t.set_color("font_disabled_color", "Button", Color(0.55, 0.53, 0.5))
+	t.set_font_size("font_size", "Button", FONT_MED)
+	t.set_stylebox("panel", "PanelContainer", _box(UI_PANEL, UI_EDGE, 10))
+	t.set_color("font_color", "Label", UI_INK)
+	t.set_stylebox("panel", "ScrollContainer", _box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 0, 0))
+	return t
+
 func setup(g: Node3D) -> void:
 	game = g
 	layer = 10
@@ -40,6 +78,12 @@ func setup(g: Node3D) -> void:
 	_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_fade.visible = false
 	add_child(_fade)
+	# applied last so the start screen and overlays inherit it too, not just the
+	# controls that happened to exist before them
+	var t := _build_theme()
+	for c in get_children():
+		if c is Control:
+			(c as Control).theme = t
 
 func _label(parent: Node, text: String, size: int, color := Color.WHITE) -> Label:
 	var l := Label.new()
@@ -336,6 +380,7 @@ func _render_market() -> void:
 	_market_body.add_child(scroll)
 	var list := VBoxContainer.new()
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.custom_minimum_size.x = 690
 	list.add_theme_constant_override("separation", 4)
 	scroll.add_child(list)
 	for item in game.market_items():
@@ -344,9 +389,15 @@ func _render_market() -> void:
 		list.add_child(row)
 		var col := VBoxContainer.new()
 		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		col.custom_minimum_size.x = 540
 		row.add_child(col)
 		_label(col, item.name, 18, Color(1, 0.95, 0.8))
-		_label(col, item.desc, 13, Color(0.65, 0.7, 0.65))
+		var desc := _label(col, item.desc, 13, Color(0.65, 0.7, 0.65))
+		# An unwrapped description sets the row's minimum width, which pushes the
+		# price button past the scroll viewport, where it is clipped away — the
+		# item is then unbuyable with no visible cause.
+		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		desc.custom_minimum_size.x = 540
 		var btn := Button.new()
 		if item.owned:
 			btn.text = "OWNED"
