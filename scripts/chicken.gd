@@ -296,12 +296,12 @@ func _settle_legs(delta: float) -> void:
 func damage(n: float) -> void:
 	hp -= n
 	if _body_mat != null:
-		_body_mat.emission_enabled = true
+		# energy only — toggling the feature recompiles the shader mid-fight
 		_body_mat.emission = Color(1, 0.3, 0.3)
 		_body_mat.emission_energy_multiplier = 0.7
 		var tw := create_tween()
 		tw.tween_interval(0.12)
-		tw.tween_callback(func(): _body_mat.emission_enabled = false)
+		tw.tween_callback(func(): _body_mat.emission_energy_multiplier = 0.0)
 	game.sfx.cluck(-4.0)
 	if hp <= 0.0:
 		game.chicken_died(self)

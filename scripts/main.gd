@@ -687,7 +687,7 @@ func turret_fire(target: Node3D) -> void:
 	var head: Vector3 = turret_node.position + Vector3(0, 1.8, 0)
 	var aim: Vector3 = (target.position + Vector3(0, 1, 0) - head).normalized()
 	turret_node.rotation.y = atan2(aim.x, aim.z)
-	var m := MK.sphere(self, 0.12, Color(0.98, 0.95, 0.85), head + aim * 0.8)
+	var m := MK.add_mesh(self, MK.sphere_mesh(0.12, 10, 5), Color(0.98, 0.95, 0.85), head + aim * 0.8)
 	projectiles.append({"node": m, "vel": aim * 22.0, "kind": "turret", "life": 2.0})
 	sfx.play("egg", -8.0)
 
@@ -751,9 +751,26 @@ func _update_particles(delta: float) -> void:
 			particles.erase(p)
 			p.node.queue_free()
 
+## One shared low-poly sphere and one material per colour, reused forever.
+## This used to build a fresh SphereMesh at Godot's default 64x32 tessellation —
+## about 2,000 triangles of CPU mesh generation — plus a fresh material, for
+## every single particle, a dozen of them per hit. That was the combat stutter.
+var _poof_mesh: SphereMesh = null
+var _poof_mats := {}
+
 func spawn_poof(pos: Vector3, color: Color, n: int) -> void:
+	if _poof_mesh == null:
+		_poof_mesh = MK.sphere_mesh(0.1, 8, 4)
+	var key := color.to_html(false)
+	if not _poof_mats.has(key):
+		_poof_mats[key] = MK.mat(color)
 	for i in n:
-		var m := MK.sphere(self, randf_range(0.06, 0.14), color, pos + Vector3(randf_range(-0.3, 0.3), randf_range(0, 0.5), randf_range(-0.3, 0.3)))
+		var m := MeshInstance3D.new()
+		m.mesh = _poof_mesh
+		m.material_override = _poof_mats[key]
+		m.position = pos + Vector3(randf_range(-0.3, 0.3), randf_range(0, 0.5), randf_range(-0.3, 0.3))
+		m.scale = Vector3.ONE * randf_range(0.6, 1.4)
+		add_child(m)
 		var vel := Vector3(randf_range(-2, 2), randf_range(1, 4), randf_range(-2, 2))
 		particles.append({"node": m, "vel": vel, "life": 0.6, "max_life": 0.6})
 

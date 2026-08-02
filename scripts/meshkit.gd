@@ -1,14 +1,23 @@
 extends RefCounted
 ## Tiny helpers for building low-poly placeholder models out of primitives.
 
+## Toggling emission_enabled at runtime swaps the shader variant, and the first
+## draw with a new variant compiles it — a visible hitch, mid-fight, every time
+## something is hit for the first time. So emission is switched on for every
+## material up front at zero energy, and the damage flash only moves the energy.
+static func prewarm_emission(m: StandardMaterial3D) -> void:
+	m.emission_enabled = true
+	m.emission = Color(0, 0, 0)
+	m.emission_energy_multiplier = 0.0
+
 static func mat(color: Color, emissive := false, energy := 1.0) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = color
 	m.roughness = 0.9
 	if color.a < 1.0:
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	prewarm_emission(m)
 	if emissive:
-		m.emission_enabled = true
 		m.emission = color
 		m.emission_energy_multiplier = energy
 	return m
@@ -77,6 +86,7 @@ static func tex_mat(color: Color, tex: Texture2D, uv_scale: float, rough := 0.95
 	if normal != null:
 		m.normal_enabled = true
 		m.normal_texture = normal
+	prewarm_emission(m)
 	return m
 
 ## Attach a mesh using a material the caller already built, instead of deriving
@@ -142,6 +152,7 @@ static func dry_mat(color: Color, tex: Texture2D = null, normal: Texture2D = nul
 		m.subsurf_scatter_enabled = true
 		m.subsurf_scatter_strength = 0.45
 		m.subsurf_scatter_skin_mode = true
+	prewarm_emission(m)
 	return m
 
 static func cone_mesh(r: float, h: float, segs := 8) -> CylinderMesh:
@@ -195,6 +206,7 @@ static func oily_mat(color: Color, tex: Texture2D, normal: Texture2D, uv_scale :
 			m.subsurf_scatter_transmittance_color = color.lerp(Color(0.9, 0.35, 0.3), 0.55)
 			m.subsurf_scatter_transmittance_depth = 0.35
 			m.subsurf_scatter_transmittance_boost = 0.25
+	prewarm_emission(m)
 	return m
 
 ## Collapse a node's MeshInstance3D descendants into one MeshInstance3D carrying
