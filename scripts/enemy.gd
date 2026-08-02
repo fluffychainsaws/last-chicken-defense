@@ -1688,7 +1688,6 @@ func ignite() -> void:
 	state = "burn"
 	_burn_t = 1.2
 	for m in _mats:
-		m.emission_enabled = true
 		m.emission = Color(1.0, 0.45, 0.1)
 		m.emission_energy_multiplier = 2.0
 	if carried != null and is_instance_valid(carried):
@@ -1700,14 +1699,13 @@ func damage(n: float) -> void:
 		return
 	hp -= n
 	for m in _mats:
-		m.emission_enabled = true
 		m.emission = Color(1, 1, 1)
 		m.emission_energy_multiplier = 1.2
 	var tw := create_tween()
 	tw.tween_interval(0.08)
 	tw.tween_callback(func():
 		for m in _mats:
-			m.emission_enabled = false)
+			m.emission_energy_multiplier = 0.0)
 	game.sfx.play("hit", -6.0)
 	if hp <= 0.0:
 		if carried != null and is_instance_valid(carried):
