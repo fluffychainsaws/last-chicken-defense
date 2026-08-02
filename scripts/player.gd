@@ -135,8 +135,7 @@ func _interact_scan() -> void:
 	elif game.is_day() and position.distance_to(game.coop_pos) < 4.5 and game.coop_hp < game.max_coop_hp():
 		ctx = "repair"
 		prompt = "[HOLD E]  REPAIR COOP  (%d%%)" % int(100.0 * game.coop_hp / game.max_coop_hp())
-	elif game.is_day() and position.distance_to(game.coop_pos) < 4.5:
-		# an intact coop is the training ground; a damaged one is repaired first
+	elif game.is_day() and position.distance_to(game.kiosk_pos) < 3.2:
 		ctx = "roost"
 		prompt = "[E]  THE ROOST  (train the flock)"
 	else:

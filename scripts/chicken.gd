@@ -34,6 +34,10 @@ var tracks := {}
 var stats := {}
 var _gear: Array = []
 var _summon_cd := 0.0
+## Owning a helmet is permanent and per bird; _helmet is only the mesh, worn
+## at dusk and stowed at dawn. A hen can own one and not be wearing it.
+var helmeted := false
+var _gear_pos := Vector3.ZERO
 var _legs: Array = []
 var _stride := 0.0
 var _head_base_z := 0.22
@@ -244,6 +248,13 @@ func tick(delta: float) -> void:
 				else:
 					state = "in_coop"
 					visible = false
+		"fetch_gear":
+			# walk out to whatever the drone dropped and claim it
+			if _walk_toward(_gear_pos, 2.6, delta):
+				helmeted = true
+				game.sfx.cluck(-6.0)
+				game.spawn_poof(position + Vector3(0, 0.6, 0), Color(0.6, 0.7, 0.5), 6)
+				state = "wander" if not game.is_night else "to_arm"
 		"to_arm":
 			# fetch the gear from the coop, then take up a post outside it
 			if _walk_toward(game.coop_door, 3.2, delta):
@@ -306,6 +317,13 @@ func _fire_at(enemy, _delta: float) -> void:
 		enemy.damage(dmg)
 		game.sfx.cluck(-8.0)
 
+## Called when a delivery lands. The hen drops what she is doing and goes.
+func await_package(pos: Vector3) -> void:
+	if helmeted or is_chick:
+		return
+	_gear_pos = pos
+	state = "fetch_gear"
+
 func start_forage() -> void:
 	forager = true
 	_tree = game.pick_tree()
@@ -318,7 +336,7 @@ func stop_forage() -> void:
 
 func night_mode() -> void:
 	stop_forage()
-	if game.upgrades.helmets and not is_chick:
+	if helmeted and not is_chick:
 		state = "to_arm"
 	else:
 		state = "to_coop"

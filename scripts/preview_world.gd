@@ -10,6 +10,8 @@ var _night := false
 var _market := false
 var _roost := false
 var _sheet := false
+var _look := Vector3.ZERO
+var _has_look := false
 var _game: Node3D = null
 var _switched := false
 
@@ -21,6 +23,11 @@ func _initialize() -> void:
 			_night = true
 		elif a == "--market":
 			_market = true
+		elif a.begins_with("--look="):
+			var p2 := a.trim_prefix("--look=").split(",")
+			if p2.size() == 3:
+				_look = Vector3(float(p2[0]), float(p2[1]), float(p2[2]))
+				_has_look = true
 		elif a == "--roost":
 			_roost = true
 		elif a == "--sheet":
@@ -54,6 +61,8 @@ func _process(_d: float) -> bool:
 		if _sheet:
 			_game.coop_sel = 0
 			_game.ui.coop_refresh()
+	if _has_look and _frames == 40 and _game.player != null:
+		_game.player.position = _look
 	if _frames < 150:
 		return false
 	var img := root.get_texture().get_image()

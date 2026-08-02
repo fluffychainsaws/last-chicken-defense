@@ -69,6 +69,7 @@ var roosters: Array = []
 var enemies: Array = []
 var projectiles: Array = []
 var minions: Array = []
+var deliveries: Array = []
 var particles: Array = []
 var egg_pickups: Array = []
 var feed_piles: Array = []
@@ -91,6 +92,9 @@ var night_theme := {}
 ## derived from these, so moving them moves the building and the run together.
 var coop_pos := Vector3(4, 0, 0)
 var coop_door := Vector3(1.6, 0, 0)
+## The upgrade kiosk stands beside the coop rather than on it, so training the
+## flock is its own place in the yard instead of a second use of the building.
+var kiosk_pos := Vector3(0.4, 0.0, 3.4)
 var computer_pos := Vector3(-24.2, 1.0, -12)
 var bed_pos := Vector3(-16.6, 0.0, -14.6)
 var sleeping := false
@@ -263,6 +267,7 @@ func _build_world() -> void:
 	path.material_override = MK.tex_mat(Color(0.9, 0.82, 0.62), _ground_tex, 3.0, 1.0, _ground_norm)
 	_build_house()
 	_build_coop()
+	_build_kiosk()
 	_build_perimeter_fence()
 	_build_forest()
 	_build_grass()
@@ -318,6 +323,26 @@ func _build_coop() -> void:
 	roof.rotation.z = 0.14
 	MK.box(self, Vector3(0.06, 1.3, 0.95), Color(0.08, 0.06, 0.05), Vector3(cx - 1.82, 0.65, cz))
 	MK.box(self, Vector3(0.06, 0.45, 1.5), Color(0.9, 0.88, 0.8), Vector3(cx - 1.85, 1.95, cz))
+
+## A little roadside stand: counter, canopy and a lit screen. Deliberately
+## small and separate, so the coop stays a building and this stays a shop.
+func _build_kiosk() -> void:
+	var post_m := MK.tex_mat(Color(0.5, 0.36, 0.22), _wood_tex, 2.0, 0.9, _wood_norm)
+	var body_m := MK.tex_mat(Color(0.86, 0.72, 0.34), _wood_tex, 2.0, 0.85, _wood_norm)
+	var k := Node3D.new()
+	k.position = kiosk_pos
+	add_child(k)
+	MK.static_box(k, Vector3(1.9, 1.1, 0.7), Vector3(0, 0.55, 0))
+	MK.box(k, Vector3(1.9, 1.1, 0.7), Color.WHITE, Vector3(0, 0.55, 0)).material_override = body_m
+	MK.box(k, Vector3(2.1, 0.09, 0.9), Color.WHITE, Vector3(0, 1.14, 0.06)).material_override = post_m
+	for side in [-1.0, 1.0]:
+		MK.box(k, Vector3(0.09, 1.1, 0.09), Color.WHITE, Vector3(side * 0.9, 1.7, -0.2)).material_override = post_m
+	var canopy := MK.box(k, Vector3(2.3, 0.09, 1.2), Color(0.72, 0.22, 0.2), Vector3(0, 2.24, 0.05))
+	canopy.rotation.x = deg_to_rad(-9)
+	# the screen glows so the stand reads at a distance and at night
+	var screen := MK.box(k, Vector3(0.9, 0.5, 0.05), Color(0.45, 0.95, 0.6), Vector3(0, 1.62, -0.22), true)
+	screen.material_override.emission_energy_multiplier = 1.1
+	MK.box(k, Vector3(0.5, 0.12, 0.5), Color(0.6, 0.5, 0.3), Vector3(0.6, 1.24, 0.1))
 
 func _tex_wall(size: Vector3, pos: Vector3, m: Material) -> void:
 	MK.static_box(self, size, pos)
@@ -531,6 +556,7 @@ func _process(delta: float) -> void:
 		e.tick(delta)
 	_update_projectiles(delta)
 	_update_minions(delta)
+	_update_deliveries(delta)
 	_update_particles(delta)
 	_update_pickups()
 	if is_night:
@@ -959,6 +985,84 @@ func nearest_chicken(pos: Vector3, radius: float):
 
 # ---------------- chicken events ----------------
 
+# ---------------- helmet deliveries ----------------
+
+## Each helmet is bought for one hen, and the next one costs more. Escalating
+## rather than a single flock-wide switch, so kitting everyone out is a campaign.
+const HELMET_BASE := 120
+const HELMET_STEP := 50
+
+func helmets_owned() -> int:
+	var n := 0
+	for c in chickens:
+		if c.helmeted:
+			n += 1
+	return n
+
+func helmet_price() -> int:
+	return HELMET_BASE + HELMET_STEP * helmets_owned()
+
+## Picks a bare-headed hen and calls in the drop. Returns false if there is
+## nobody left to kit out, so buy() can refund the intent.
+func _deliver_helmet() -> bool:
+	var candidates := []
+	for c in chickens:
+		if not c.helmeted and not c.is_chick:
+			candidates.append(c)
+	if candidates.is_empty():
+		sfx.play("denied")
+		return false
+	var hen = candidates[randi() % candidates.size()]
+	var drop: Vector3 = hen.position + Vector3(randf_range(-1.2, 1.2), 0, randf_range(-1.2, 1.2))
+	# drone enters from the treeline so the delivery reads as arriving
+	var from := Vector3(drop.x - 26.0, 11.0, drop.z - 14.0)
+	var body := MK.box(self, Vector3(0.5, 0.14, 0.5), Color(0.22, 0.23, 0.26), Vector3.ZERO)
+	var drone := Node3D.new()
+	drone.position = from
+	add_child(drone)
+	body.reparent(drone)
+	body.position = Vector3.ZERO
+	for dx in [-0.3, 0.3]:
+		for dz in [-0.3, 0.3]:
+			MK.cyl(drone, 0.22, 0.22, 0.03, Color(0.35, 0.36, 0.4, 0.55), Vector3(dx, 0.1, dz))
+	MK.box(drone, Vector3(0.12, 0.05, 0.12), Color(0.9, 0.3, 0.25), Vector3(0, -0.1, 0), true)
+	deliveries.append({"drone": drone, "hen": hen, "drop": drop, "phase": "in", "pkg": null, "t": 0.0})
+	ui.announce("INCOMING DELIVERY", "one tiny war helmet")
+	return true
+
+func _update_deliveries(delta: float) -> void:
+	for d in deliveries.duplicate():
+		d.t += delta
+		match d.phase:
+			"in":
+				var over: Vector3 = d.drop + Vector3(0, 6.0, 0)
+				d.drone.position = d.drone.position.move_toward(over, 14.0 * delta)
+				d.drone.rotation.y += delta * 3.0
+				if d.drone.position.distance_to(over) < 0.4:
+					var pkg := MK.box(self, Vector3(0.34, 0.3, 0.34), Color(0.55, 0.45, 0.3), d.drone.position)
+					MK.box(pkg, Vector3(0.36, 0.06, 0.36), Color(0.8, 0.2, 0.18), Vector3(0, 0.02, 0))
+					d.pkg = pkg
+					d.phase = "drop"
+					sfx.play("grab", -10.0)
+			"drop":
+				d.pkg.position.y = maxf(0.18, d.pkg.position.y - 9.0 * delta)
+				d.drone.position.y += delta * 1.5
+				if d.pkg.position.y <= 0.19:
+					spawn_poof(d.pkg.position, Color(0.7, 0.65, 0.5), 6)
+					if is_instance_valid(d.hen):
+						d.hen.await_package(d.pkg.position)
+					d.phase = "out"
+			"out":
+				# drone leaves under its own power; the package waits to be claimed
+				d.drone.position += Vector3(1.0, 0.55, 0.6) * 11.0 * delta
+				var claimed: bool = not is_instance_valid(d.hen) or d.hen.helmeted
+				if claimed or d.t > 26.0:
+					if is_instance_valid(d.pkg):
+						d.pkg.queue_free()
+					if is_instance_valid(d.drone):
+						d.drone.queue_free()
+					deliveries.erase(d)
+
 func _spawn_chicken(pos: Vector3, chick: bool) -> void:
 	var c = ChickenScript.new()
 	add_child(c)
@@ -1099,7 +1203,7 @@ func market_items() -> Array:
 		{"id": "feed5", "name": "CHICKEN FEED x5", "desc": "throw it. a chicken will come eat it and heal 30 hp.", "price": 12, "owned": false},
 		{"id": "shotgun", "name": "PUMP SHOTGUN", "desc": "the farmer's argument. includes 8 shells.", "price": 150, "owned": upgrades.shotgun},
 		{"id": "shells8", "name": "SHELLS x8", "desc": "arguments, refilled.", "price": 20, "owned": false},
-		{"id": "helmets", "name": "TINY WAR HELMETS", "desc": "hens fight at night instead of hiding. they have chosen violence.", "price": 120, "owned": upgrades.helmets},
+		{"id": "helmets", "name": "TINY WAR HELMET", "desc": "fits one hen. she fights at night instead of hiding. air-dropped, because the supplier insists. (%d of %d kitted)" % [helmets_owned(), chickens.size()], "price": helmet_price(), "owned": helmets_owned() >= chickens.size()},
 		{"id": "turret", "name": "EGG TURRET", "desc": "automated yolk-based yard defense.", "price": 250, "owned": upgrades.turret},
 		{"id": "shoes", "name": "RUNNING SHOES", "desc": "+25% farmer speed. they light up. tactically.", "price": 90, "owned": upgrades.shoes},
 		{"id": "medkit", "name": "FIRST AID", "desc": "patch yourself back to full.", "price": 15, "owned": false},
@@ -1138,7 +1242,8 @@ func buy(id: String) -> void:
 		"shells8":
 			shells += 8
 		"helmets":
-			upgrades.helmets = true
+			if not _deliver_helmet():
+				return
 		"turret":
 			upgrades.turret = true
 			_build_turret()
@@ -1367,7 +1472,7 @@ func _save_game() -> void:
 	# progression is per bird, so the roster is stored, not just a count
 	var flock := []
 	for c in chickens:
-		flock.append({"class": c.class_id, "spec": c.spec_id, "tracks": c.tracks})
+		flock.append({"class": c.class_id, "spec": c.spec_id, "tracks": c.tracks, "helm": c.helmeted})
 	var crew := []
 	for r in roosters:
 		crew.append({"class": "rooster", "spec": r.spec_id, "tracks": r.tracks})
@@ -1400,6 +1505,9 @@ func _load_game() -> void:
 			upgrades[k] = loaded_upgrades[k]
 	upgrades.fence = int(upgrades.fence)
 	upgrades.coop = int(upgrades.coop)
+	# the helmet upgrade used to be a single flock-wide switch; an old save
+	# carrying it should not silently kit out the entire yard
+	upgrades.helmets = false
 	if upgrades.turret:
 		_build_turret()
 	var hens := int(data.get("hens", 10))
@@ -1420,6 +1528,8 @@ func _restore_progression(birds: Array, saved) -> void:
 		if not (row is Dictionary):
 			continue
 		birds[i].class_id = str(row.get("class", birds[i].class_id))
+		if "helm" in row and "helmeted" in birds[i]:
+			birds[i].helmeted = bool(row["helm"])
 		birds[i].spec_id = str(row.get("spec", ""))
 		var tr = row.get("tracks", {})
 		if tr is Dictionary:
