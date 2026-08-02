@@ -22,6 +22,9 @@ var _eat_pile = null
 var _head: Node3D
 var _body_mat: StandardMaterial3D
 var _helmet: MeshInstance3D = null
+## A guard post, held for several seconds at a time. Re-rolling a destination on
+## every single frame is what made helmeted hens vibrate in the coop doorway.
+var _post := Vector3.ZERO
 var _legs: Array = []
 var _stride := 0.0
 var _head_base_z := 0.22
@@ -108,6 +111,18 @@ func apply_helmet() -> void:
 		return
 	_helmet = MK.cyl(_head, 0.14, 0.18, 0.1, Color(0.35, 0.4, 0.35), Vector3(0, 0.14, 0))
 
+func remove_helmet() -> void:
+	if _helmet != null:
+		_helmet.queue_free()
+		_helmet = null
+
+## Somewhere near the coop to stand watch, held until the timer runs out.
+func _pick_post() -> void:
+	var a := randf() * TAU
+	var r := randf_range(2.2, 4.8)
+	_post = game.coop_door + Vector3(cos(a) * r, 0, sin(a) * r)
+	_timer = randf_range(4.0, 8.0)
+
 func targetable() -> bool:
 	return state != "in_coop" and state != "carried"
 
@@ -173,8 +188,25 @@ func tick(delta: float) -> void:
 				else:
 					state = "in_coop"
 					visible = false
+		"to_arm":
+			# fetch the gear from the coop, then take up a post outside it
+			if _walk_toward(game.coop_door, 3.2, delta):
+				apply_helmet()
+				_pick_post()
+				state = "guard"
+		"to_stow":
+			# the night's gear goes back in the coop before the day resumes
+			if _walk_toward(game.coop_door, 2.6, delta):
+				remove_helmet()
+				if forager:
+					_tree = game.pick_tree()
+					state = "forage_go"
+				else:
+					state = "wander"
 		"guard":
-			var enemy = game.nearest_enemy(position, 3.2)
+			# a wider notice radius than the old 3.2, which was short enough that
+			# they lunged at something and immediately lost interest in it
+			var enemy = game.nearest_enemy(position, 6.0)
 			if enemy != null:
 				_walk_toward(enemy.position, 2.6, delta)
 				_head.rotation.x = maxf(0.0, sin(_peck_t * 10.0)) * 1.2
@@ -183,7 +215,9 @@ func tick(delta: float) -> void:
 					enemy.damage(4.0)
 					game.sfx.cluck(-8.0)
 			else:
-				_walk_toward(game.coop_door + Vector3(randf_range(-2, 2), 0, randf_range(-2, 2)), 1.8, delta)
+				if _timer <= 0.0 or _post == Vector3.ZERO:
+					_pick_post()
+				_walk_toward(_post, 1.6, delta)
 		"panic":
 			if _timer <= 0.0:
 				_target = game.rand_in_yard()
@@ -204,14 +238,17 @@ func stop_forage() -> void:
 func night_mode() -> void:
 	stop_forage()
 	if game.upgrades.helmets and not is_chick:
-		apply_helmet()
-		state = "guard"
+		state = "to_arm"
 	else:
 		state = "to_coop"
 
 func day_mode() -> void:
 	visible = true
 	hp = minf(max_hp, hp + 5.0)
+	_post = Vector3.ZERO
+	if _helmet != null:
+		state = "to_stow"
+		return
 	state = "forage_go" if forager else "wander"
 	if forager:
 		_tree = game.pick_tree()
