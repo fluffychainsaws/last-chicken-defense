@@ -7,12 +7,15 @@ const ENEMY := preload("res://scripts/enemy.gd")
 
 var _frames := 0
 var _out := "preview.png"
+var _walk_strip := false
 
 func _initialize() -> void:
 	var want := "midget"
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--out="):
 			_out = a.trim_prefix("--out=")
+		elif a == "--walk":
+			_walk_strip = true
 		elif not a.begins_with("-"):
 			want = a
 
@@ -96,6 +99,13 @@ func _initialize() -> void:
 		x += widths[i] * 0.5
 		# faces point +Z, same as the camera's side, so 0 yaw looks down the lens
 		e3.rotation.y = deg_to_rad(randf_range(-9, 9))
+		if _walk_strip:
+			# one still can't show a gait, so step each figure a fifth of the way
+			# through the cycle and read the strip left to right. delta 0 poses
+			# without advancing the phase.
+			e3.rotation.y = deg_to_rad(-72)
+			e3._stride = TAU * float(i) / float(lineup.size())
+			e3._walk(0.0, 0.0)
 		tallest = maxf(tallest, float(t["scale"]))
 
 	var cam := Camera3D.new()
