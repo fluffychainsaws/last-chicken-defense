@@ -105,6 +105,12 @@ func _build_mesh() -> void:
 	if theme.get("id", "") == "bones":
 		_build_bones()
 		return
+	if theme.get("id", "") == "wolf":
+		_build_wolf()
+		return
+	if theme.get("id", "") == "bigfoot":
+		_build_bigfoot()
+		return
 	var s: float = body_scale
 	var body_c: Color = theme["body"]
 	var eye_c: Color = theme["eye"]
@@ -766,6 +772,227 @@ func _build_bones() -> void:
 		for i in 6:
 			var tx := (float(i) - 2.5) * 0.032 * s
 			MK.skinned(head, MK.sphere_mesh(0.016 * s), bone, Vector3(tx, -0.1 * s, hr * 0.82)).scale = Vector3(1.0, 1.4, 0.7)
+	_batch_body()
+
+## The big bad wolf: a quadruped, which the rest of the roster is not, so it
+## reads as something else entirely coming out of the trees. Legs are appended in
+## diagonal pairs — front-left with back-right — because the gait alternates on
+## odd/even index, and that ordering turns the same code into a trot.
+func _build_wolf() -> void:
+	body_scale *= randf_range(0.94, 1.08)
+	var s: float = body_scale
+	var detail := not OS.has_feature("web")
+
+	var pelts := [
+		Color(0.26, 0.24, 0.26), Color(0.32, 0.29, 0.28),
+		Color(0.20, 0.19, 0.22), Color(0.36, 0.32, 0.30),
+	]
+	var pelt: Color = pelts[randi() % pelts.size()]
+	var eye_c := Color(1.0, 0.3, 0.1)
+	var maps := skin_maps("wolf", 1212, 0.055, 3434, 0.26)
+	# fur is matte, not wet — the oily treatment would read as a seal
+	var fur := MK.dry_mat(pelt, maps[0], maps[1], 0.85)
+	var dark := MK.dry_mat(pelt.darkened(0.3), maps[0], maps[1], 0.85)
+	var tooth := MK.dry_mat(Color(0.9, 0.88, 0.78), null, null, 0.45)
+	_mats.append(fur)
+	_mats.append(dark)
+
+	# --- four legs. Order matters: FL, FR, BR, BL gives diagonals on i % 2. ---
+	var feet := [
+		Vector3(0.24, 0.62, 0.42), Vector3(-0.24, 0.62, 0.42),
+		Vector3(-0.26, 0.62, -0.5), Vector3(0.26, 0.62, -0.5),
+	]
+	for i in feet.size():
+		var f: Vector3 = feet[i]
+		var front: bool = i < 2
+		var hip := Node3D.new()
+		hip.position = Vector3(f.x * s, f.y * s, f.z * s)
+		add_child(hip)
+		_legs.append(hip)
+		MK.skinned(hip, MK.sphere_mesh(0.13 * s, 20, 10), fur, Vector3(0, -0.13 * s, 0)).scale = Vector3(1.0, 1.7, 1.2)
+		var knee := Node3D.new()
+		knee.position = Vector3(0, -0.3 * s, 0)
+		hip.add_child(knee)
+		_knees.append(knee)
+		MK.skinned(knee, MK.sphere_mesh(0.085 * s), fur, Vector3(0, -0.13 * s, 0)).scale = Vector3(1.0, 1.9, 1.0)
+		var paw := MK.skinned(knee, MK.sphere_mesh(0.11 * s), dark, Vector3(0, -0.3 * s, 0.03 * s))
+		paw.scale = Vector3(1.0, 0.6, 1.3)
+		if detail:
+			for c in 3:
+				var claw := MK.skinned(knee, MK.cone_mesh(0.022 * s, 0.07 * s), tooth,
+					Vector3((float(c) - 1.0) * 0.05 * s, -0.32 * s, 0.13 * s))
+				claw.rotation.x = deg_to_rad(105)
+		if not front:
+			# haunch: the mass that makes a wolf look like it can spring
+			var haunch := MK.skinned(hip, MK.sphere_mesh(0.21 * s, 20, 10), fur, Vector3(0, 0.02 * s, -0.06 * s))
+			haunch.scale = Vector3(0.85, 1.1, 1.15)
+
+	# --- body: a long barrel slung between the shoulders and hips ---
+	var torso := Node3D.new()
+	torso.position = Vector3(0, 0.78 * s, 0)
+	add_child(torso)
+	var chest := MK.skinned(torso, MK.sphere_mesh(0.3 * s, 24, 12), fur, Vector3(0, 0.02 * s, 0.36 * s))
+	chest.scale = Vector3(1.0, 1.05, 1.25)
+	var belly := MK.skinned(torso, MK.sphere_mesh(0.26 * s, 24, 12), fur, Vector3(0, -0.02 * s, -0.16 * s))
+	belly.scale = Vector3(0.95, 0.95, 1.5)
+	var rump := MK.skinned(torso, MK.sphere_mesh(0.27 * s, 20, 10), fur, Vector3(0, 0.02 * s, -0.54 * s))
+	rump.scale = Vector3(0.95, 1.0, 1.0)
+	# raised hackles down the spine
+	if detail:
+		for i in 6:
+			var t := float(i) / 5.0
+			var hack := MK.skinned(torso, MK.cone_mesh(0.045 * s, lerpf(0.22, 0.12, t) * s), dark,
+				Vector3(0, 0.26 * s, (0.42 - t * 0.95) * s))
+			hack.rotation.x = deg_to_rad(-14)
+
+	# --- neck and head, carried low and forward like a hunting animal ---
+	var neck := MK.skinned(torso, MK.sphere_mesh(0.2 * s, 20, 10), fur, Vector3(0, 0.12 * s, 0.62 * s))
+	neck.scale = Vector3(1.0, 1.0, 1.3)
+	var head := Node3D.new()
+	head.position = Vector3(0, 0.2 * s, 0.85 * s)
+	head.rotation.x = deg_to_rad(6)
+	torso.add_child(head)
+	var hr := 0.19 * s
+	var skull := MK.skinned(head, MK.sphere_mesh(hr, 24, 12), fur, Vector3.ZERO)
+	skull.scale = Vector3(1.0, 1.0, 1.1)
+	# snout: a tapered muzzle out front, jaw slung under it
+	var muzzle := MK.skinned(head, MK.sphere_mesh(0.12 * s, 20, 10), fur, Vector3(0, -0.05 * s, hr * 1.45))
+	muzzle.scale = Vector3(0.85, 0.8, 1.8)
+	MK.add_mesh(head, MK.sphere_mesh(0.045 * s), Color(0.06, 0.05, 0.05), Vector3(0, 0.0, hr * 2.2))
+	var jaw := MK.skinned(head, MK.sphere_mesh(0.09 * s), dark, Vector3(0, -0.13 * s, hr * 1.4))
+	jaw.scale = Vector3(0.8, 0.6, 1.7)
+	# fangs, clear of the muzzle surface
+	if detail:
+		for side in [-1.0, 1.0]:
+			for k in 2:
+				var fang := MK.skinned(head, MK.cone_mesh(0.022 * s, 0.09 * s), tooth,
+					Vector3(side * 0.055 * s, -0.08 * s, (1.35 + float(k) * 0.35) * hr))
+				fang.rotation.x = deg_to_rad(180)
+	# eyes, forward-facing and set above the muzzle line
+	for side in [-1.0, 1.0]:
+		MK.add_mesh(head, MK.sphere_mesh(0.034 * s), eye_c, Vector3(side * 0.085 * s, 0.06 * s, hr * 0.86), true, 2.0)
+	# ears: swept back, tall triangles
+	for side in [-1.0, 1.0]:
+		var ear := MK.skinned(head, MK.cone_mesh(0.075 * s, 0.28 * s), fur,
+			Vector3(side * 0.11 * s, 0.19 * s, -0.03 * s))
+		ear.rotation.z = deg_to_rad(-side * 20.0)
+		ear.rotation.x = deg_to_rad(-18)
+		ear.scale = Vector3(1.0, 1.0, 0.5)
+
+	# --- tail: a heavy brush, carried out behind ---
+	var tail := Node3D.new()
+	tail.position = Vector3(0, 0.1 * s, -0.78 * s)
+	tail.rotation.x = deg_to_rad(28)
+	torso.add_child(tail)
+	for i in 4:
+		var t := float(i) / 3.0
+		MK.skinned(tail, MK.sphere_mesh(lerpf(0.11, 0.055, t) * s), dark,
+			Vector3(0, -0.02 * s - t * 0.05 * s, -t * 0.42 * s))
+	_batch_body()
+
+## Bigfoot: the heaviest thing in the game, so the build is all mass up top —
+## enormous shoulders, arms that hang to the knee, and almost no neck. Shag is
+## made of tufts laid over the silhouette rather than any fur shader.
+func _build_bigfoot() -> void:
+	body_scale *= randf_range(0.95, 1.06)
+	var s: float = body_scale
+	var detail := not OS.has_feature("web")
+
+	var pelts := [
+		Color(0.38, 0.27, 0.18), Color(0.30, 0.22, 0.16),
+		Color(0.45, 0.33, 0.22), Color(0.25, 0.19, 0.15),
+	]
+	var pelt: Color = pelts[randi() % pelts.size()]
+	# a real amber: near-white emission clips to a flat white disc at any energy
+	var eye_c := Color(0.95, 0.82, 0.32)
+	var maps := skin_maps("bigfoot", 2323, 0.05, 5656, 0.22)
+	var fur := MK.dry_mat(pelt, maps[0], maps[1], 0.9)
+	# face and palms are bare hide, so they catch light differently to the shag
+	var hide := MK.dry_mat(pelt.lightened(0.1), maps[0], maps[1], 0.62, true)
+	_mats.append(fur)
+	_mats.append(hide)
+
+	# --- legs: short and tree-trunk thick under all that weight ---
+	for side in [-1.0, 1.0]:
+		var hip := Node3D.new()
+		hip.position = Vector3(side * 0.22 * s, 0.62 * s, 0)
+		add_child(hip)
+		_legs.append(hip)
+		MK.skinned(hip, MK.sphere_mesh(0.17 * s, 20, 10), fur, Vector3(0, -0.16 * s, 0)).scale = Vector3(1.0, 1.6, 1.0)
+		var knee := Node3D.new()
+		knee.position = Vector3(0, -0.34 * s, 0)
+		hip.add_child(knee)
+		_knees.append(knee)
+		MK.skinned(knee, MK.sphere_mesh(0.15 * s), fur, Vector3(0, -0.12 * s, 0)).scale = Vector3(1.0, 1.5, 1.0)
+		var foot := MK.skinned(knee, MK.sphere_mesh(0.16 * s), hide, Vector3(0, -0.28 * s, 0.09 * s))
+		foot.scale = Vector3(1.0, 0.45, 1.7)
+
+	# --- torso: a wedge, colossal at the shoulders, tapering to the hips ---
+	var torso := Node3D.new()
+	torso.position = Vector3(0, 0.62 * s, 0)
+	torso.rotation.x = deg_to_rad(9)
+	add_child(torso)
+	var gut := MK.skinned(torso, MK.sphere_mesh(0.32 * s, 24, 12), fur, Vector3(0, 0.16 * s, 0))
+	gut.scale = Vector3(1.1, 1.15, 0.9)
+	var chest := MK.skinned(torso, MK.sphere_mesh(0.42 * s, 24, 12), fur, Vector3(0, 0.6 * s, 0))
+	chest.scale = Vector3(1.45, 1.0, 0.95)
+
+	# --- shag: tufts laid along the silhouette ---
+	if detail:
+		for i in randi_range(14, 20):
+			var dir := Vector3(randf_range(-1.0, 1.0), randf_range(-0.9, 0.9), randf_range(-1.0, 1.0)).normalized()
+			var on := Vector3(0, 0.4 * s, 0) + Vector3(dir.x * 1.35, dir.y * 1.5, dir.z * 0.95) * 0.34 * s
+			var tuft := MK.skinned(torso, MK.cone_mesh(randf_range(0.05, 0.09) * s, randf_range(0.18, 0.34) * s), fur, on)
+			tuft.rotation.x = deg_to_rad(randf_range(150, 210))
+			tuft.rotation.z = deg_to_rad(randf_range(-30, 30))
+
+	# --- arms: long enough to reach the knees, hanging heavy ---
+	for side in [-1.0, 1.0]:
+		var sh := Node3D.new()
+		sh.position = Vector3(side * 0.56 * s, 0.64 * s, 0)
+		sh.rotation.x = deg_to_rad(-12)
+		sh.rotation.z = deg_to_rad(-side * 11.0)
+		torso.add_child(sh)
+		_arms.append(sh)
+		_arm_rest.append(sh.rotation.x)
+		MK.skinned(sh, MK.sphere_mesh(0.16 * s, 20, 10), fur, Vector3(0, -0.22 * s, 0)).scale = Vector3(1.0, 1.9, 1.0)
+		MK.skinned(sh, MK.sphere_mesh(0.13 * s), fur, Vector3(0, -0.62 * s, 0.02 * s)).scale = Vector3(1.0, 1.7, 1.0)
+		var hand := MK.skinned(sh, MK.sphere_mesh(0.15 * s), hide, Vector3(0, -0.94 * s, 0.03 * s))
+		hand.scale = Vector3(1.0, 0.9, 0.65)
+		if detail:
+			for f in 4:
+				var fin := MK.skinned(sh, MK.sphere_mesh(0.032 * s), hide,
+					Vector3((float(f) - 1.5) * 0.062 * s, -1.06 * s, 0.03 * s))
+				fin.scale = Vector3(1.0, 2.0, 1.0)
+
+	# --- head: sunk into the shoulders, sloped brow, no forehead ---
+	var head := Node3D.new()
+	head.position = Vector3(0, 0.98 * s, 0.03 * s)
+	head.rotation.x = deg_to_rad(-9)
+	torso.add_child(head)
+	var hr := 0.26 * s
+	var skull := MK.skinned(head, MK.sphere_mesh(hr, 24, 12), fur, Vector3.ZERO)
+	skull.scale = Vector3(1.0, 1.05, 1.0)
+	# sagittal crest, the ridge that makes an ape skull read as an ape
+	var crest := MK.skinned(head, MK.cone_mesh(0.08 * s, 0.18 * s), fur, Vector3(0, 0.2 * s, -0.02 * s))
+	crest.scale = Vector3(0.5, 1.0, 1.4)
+	# bare face, pushed proud of the fur
+	var face := MK.skinned(head, MK.sphere_mesh(0.2 * s, 20, 10), hide, Vector3(0, -0.05 * s, hr * 0.6))
+	face.scale = Vector3(0.95, 1.05, 0.65)
+	# heavy brow above the eyes, not across them
+	var brow := MK.skinned(head, MK.sphere_mesh(0.19 * s), fur, Vector3(0, 0.12 * s, hr * 0.62))
+	brow.scale = Vector3(1.1, 0.36, 0.7)
+	for side in [-1.0, 1.0]:
+		MK.add_mesh(head, MK.sphere_mesh(0.034 * s), eye_c, Vector3(side * 0.085 * s, 0.0, hr * 0.95), true, 1.1)
+	# muzzle and jaw
+	var muzzle := MK.skinned(head, MK.sphere_mesh(0.13 * s), hide, Vector3(0, -0.15 * s, hr * 0.86))
+	muzzle.scale = Vector3(1.0, 0.75, 0.85)
+	MK.add_mesh(head, MK.sphere_mesh(0.075 * s), Color(0.14, 0.07, 0.06), Vector3(0, -0.19 * s, hr * 1.05)).scale = Vector3(1.3, 0.5, 0.45)
+	if detail:
+		for i in 4:
+			var tx := (float(i) - 1.5) * 0.045 * s
+			MK.skinned(head, MK.cone_mesh(0.018 * s, 0.06 * s), MK.dry_mat(Color(0.9, 0.88, 0.78), null, null, 0.45),
+				Vector3(tx, -0.16 * s, hr * 1.12)).rotation.x = deg_to_rad(180)
 	_batch_body()
 
 ## Batch a finished procedural body. Each animated joint collapses on its own so
