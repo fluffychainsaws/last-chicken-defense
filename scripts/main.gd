@@ -65,6 +65,7 @@ var chickens: Array = []
 var roosters: Array = []
 var enemies: Array = []
 var projectiles: Array = []
+var minions: Array = []
 var particles: Array = []
 var egg_pickups: Array = []
 var feed_piles: Array = []
@@ -543,6 +544,7 @@ func _process(delta: float) -> void:
 	for e in enemies.duplicate():
 		e.tick(delta)
 	_update_projectiles(delta)
+	_update_minions(delta)
 	_update_particles(delta)
 	_update_pickups()
 	if is_night:
@@ -651,7 +653,25 @@ func remove_enemy(e: Node3D, give_bounty: bool) -> void:
 		add_coins(int(e.theme.bounty))
 		sfx.play("coin", -6.0)
 		spawn_poof(e.position + Vector3(0, 1, 0), e.theme.body, 10)
+		_try_raise(e.position)
 	e.queue_free()
+
+## A necromancer in range of a fresh corpse gets it back on its feet, fighting
+## for the yard this time. One raise per kill, whoever is nearest.
+func _try_raise(pos: Vector3) -> void:
+	var best = null
+	var best_d := 1e9
+	for c in chickens:
+		if not bool(c.stats.get("raise", false)):
+			continue
+		if c.state != "guard" and c.state != "perch":
+			continue
+		var d: float = c.position.distance_to(pos)
+		if d < float(c.stats.get("range", 12.0)) and d < best_d:
+			best = c
+			best_d = d
+	if best != null:
+		summon_minion(pos, "risen", float(best.stats.get("dmg", 8.0)) * 0.5)
 
 func melee_attack(origin: Vector3, dir: Vector3) -> void:
 	var best = null
@@ -778,6 +798,84 @@ func consume_feed_pile(pile) -> void:
 	if feed_piles.has(pile):
 		feed_piles.erase(pile)
 		pile.node.queue_free()
+
+## Summoned and raised helpers. Deliberately dicts in a pool rather than full
+## Chicken nodes: they exist for a few seconds, want none of the day/night or
+## foraging machinery, and a wave can hold a dozen at once.
+const MINION_CAP := 14
+
+var _minion_meshes := {}
+var _minion_mats := {}
+
+func minion_count(kind: String) -> int:
+	var n := 0
+	for m in minions:
+		if m.kind == kind:
+			n += 1
+	return n
+
+func summon_minion(pos: Vector3, kind: String, dmg: float) -> void:
+	if minions.size() >= MINION_CAP:
+		return
+	# meshes and materials are built once and shared — building them per summon
+	# is exactly the mistake that made combat stutter
+	if not _minion_meshes.has(kind):
+		_minion_meshes[kind] = MK.sphere_mesh(0.16, 10, 6)
+		var col := Color(0.55, 1.0, 0.62) if kind == "spirit" else Color(0.82, 0.8, 0.7)
+		var mm := MK.mat(col)
+		if kind == "spirit":
+			mm.emission = col
+			mm.emission_energy_multiplier = 1.4
+			mm.albedo_color = Color(col.r, col.g, col.b, 0.75)
+			mm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_minion_mats[kind] = mm
+	var root := Node3D.new()
+	root.position = pos + Vector3(randf_range(-0.6, 0.6), 0, randf_range(-0.6, 0.6))
+	add_child(root)
+	var body := MeshInstance3D.new()
+	body.mesh = _minion_meshes[kind]
+	body.material_override = _minion_mats[kind]
+	body.position = Vector3(0, 0.3, 0)
+	root.add_child(body)
+	var head := MeshInstance3D.new()
+	head.mesh = _minion_meshes[kind]
+	head.material_override = _minion_mats[kind]
+	head.position = Vector3(0, 0.52, 0.1)
+	head.scale = Vector3.ONE * 0.6
+	root.add_child(head)
+	minions.append({
+		"node": root, "kind": kind, "life": 14.0 if kind == "spirit" else 20.0,
+		"dmg": dmg, "cd": 0.0, "bob": randf() * TAU,
+	})
+	spawn_poof(pos, Color(0.55, 1.0, 0.62) if kind == "spirit" else Color(0.6, 0.9, 0.6), 6)
+
+func _update_minions(delta: float) -> void:
+	for m in minions.duplicate():
+		m.life -= delta
+		m.cd -= delta
+		if m.life <= 0.0 or not is_instance_valid(m.node):
+			if is_instance_valid(m.node):
+				spawn_poof(m.node.position, Color(0.5, 0.8, 0.55), 4)
+				m.node.queue_free()
+			minions.erase(m)
+			continue
+		m.bob += delta * 6.0
+		var target = nearest_enemy(m.node.position, 26.0)
+		if target == null:
+			# nothing to chase: drift back toward the coop and wait
+			var home: Vector3 = coop_door + Vector3(0, 0, 2.0)
+			if m.node.position.distance_to(home) > 2.5:
+				m.node.position += (home - m.node.position).normalized() * 2.0 * delta
+		else:
+			var to: Vector3 = target.position - m.node.position
+			to.y = 0.0
+			if to.length() > 1.3:
+				m.node.position += to.normalized() * 3.4 * delta
+				m.node.rotation.y = atan2(to.x, to.z)
+			elif m.cd <= 0.0:
+				m.cd = 1.0
+				target.damage(m.dmg)
+		m.node.position.y = absf(sin(m.bob)) * 0.12
 
 func _update_particles(delta: float) -> void:
 	for p in particles.duplicate():

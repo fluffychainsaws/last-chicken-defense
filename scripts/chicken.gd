@@ -33,6 +33,7 @@ var spec_id := ""
 var tracks := {}
 var stats := {}
 var _gear: Array = []
+var _summon_cd := 0.0
 var _legs: Array = []
 var _stride := 0.0
 var _head_base_z := 0.22
@@ -183,6 +184,7 @@ func targetable() -> bool:
 func tick(delta: float) -> void:
 	_timer -= delta
 	_attack_cd -= delta
+	_summon_cd -= delta
 	_peck_t += delta
 	if is_chick and not game.is_night:
 		age += delta
@@ -292,6 +294,11 @@ func _fire_at(enemy, _delta: float) -> void:
 	if position.distance_to(enemy.position) > float(stats.get("range", 1.6)):
 		return
 	_attack_cd = float(stats.get("cd", 0.8))
+	# a summoner keeps a small retinue up while she has something to shoot at
+	if bool(stats.get("summon", false)) and _summon_cd <= 0.0:
+		if game.minion_count("spirit") < 5:
+			_summon_cd = 6.0
+			game.summon_minion(position, "spirit", float(stats.get("dmg", 8.0)) * 0.45)
 	var dmg: float = float(stats.get("dmg", 4.0))
 	if bool(stats.get("ranged", false)):
 		game.hen_shot(self, enemy, dmg, stats)

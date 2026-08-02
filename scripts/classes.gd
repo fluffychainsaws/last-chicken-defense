@@ -181,6 +181,7 @@ static func stats(class_id: String, spec_id: String, tracks: Dictionary) -> Dict
 		"splash": float(sp.get("splash", 0.0)),
 		"burn": bool(sp.get("burn", false)),
 		"summon": bool(sp.get("summon", false)),
+		"raise": bool(sp.get("raise", false)),
 		"aura_heal": float(sp.get("aura_heal", 0.0)),
 		"aura_dmg": float(sp.get("aura_dmg", 0.0)),
 		"shot_colour": sp.get("shot", Color(0.95, 0.95, 0.8)),
