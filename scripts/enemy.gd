@@ -23,21 +23,14 @@ const THEMES := [
 	{"id": "dragon", "name": "A LITERAL DRAGON???", "sub": "of course it wants chicken", "body": Color(0.55, 0.15, 0.6), "eye": Color(1, 0.5, 0.1), "scale": 2.0, "speed": 5.0, "hp": 500.0, "dmg": 30.0, "bounty": 100, "base": 1.0, "per": 0.0, "boss": true, "min_night": 8, "flying": true, "wings": true},
 ]
 
-## Themes with a body of their own rather than the shared placeholder. The first
-## few nights draw only from these, so a new player meets the ones that actually
-## look like something before the generic capsules turn up.
-const FEATURED := ["goblin", "midget"]
-const FEATURED_NIGHTS := 3
-
+## Every non-boss theme now has a body of its own, so the opening nights no
+## longer need steering away from the shared placeholder — the whole roster is
+## fair game from night one again.
 static func pick_theme(night: int) -> Dictionary:
 	var bosses := THEMES.filter(func(t): return t.get("boss", false) and night >= t.get("min_night", 99))
 	var normals := THEMES.filter(func(t): return not t.get("boss", false))
 	if night % 4 == 0 and bosses.size() > 0:
 		return bosses[randi() % bosses.size()]
-	if night <= FEATURED_NIGHTS:
-		var featured := normals.filter(func(t): return t["id"] in FEATURED)
-		if featured.size() > 0:
-			return featured[randi() % featured.size()]
 	return normals[randi() % normals.size()]
 
 var game: Node3D
@@ -105,6 +98,12 @@ func _build_mesh() -> void:
 		return
 	if theme.get("id", "") == "grey":
 		_build_grey()
+		return
+	if theme.get("id", "") == "zombie":
+		_build_zombie()
+		return
+	if theme.get("id", "") == "bones":
+		_build_bones()
 		return
 	var s: float = body_scale
 	var body_c: Color = theme["body"]
@@ -546,6 +545,227 @@ func _build_midget() -> void:
 		MK.sphere(club, 0.055 * s, wood.darkened(0.1), Vector3(0, length * 0.9, 0))
 		if randf() < 0.5:
 			MK.sphere(club, 0.03 * s, wood.lightened(0.08), Vector3(0.02 * s, length * 0.6, 0))
+	_batch_body()
+
+## The shuffling dead: asymmetry is the whole trick. A corpse doesn't stand
+## square — one shoulder drops, the head lolls, one arm hangs dead while the
+## other reaches. Every pose value below is rolled per side, so no two zombies
+## are broken in the same place.
+func _build_zombie() -> void:
+	body_scale *= randf_range(0.88, 1.12)
+	var s: float = body_scale
+	var detail := not OS.has_feature("web")
+	# which side of this one rotted worse
+	var bad: float = 1.0 if randf() < 0.5 else -1.0
+
+	var hides := [
+		Color(0.34, 0.46, 0.29), Color(0.40, 0.44, 0.31),
+		Color(0.29, 0.42, 0.32), Color(0.44, 0.48, 0.35),
+	]
+	var hide: Color = hides[randi() % hides.size()]
+	var bone_c := Color(0.82, 0.79, 0.68)
+	var eye_c := Color(1.0, 0.15, 0.15)
+
+	var maps := skin_maps("zombie", 5150, 0.06, 8123, 0.2)
+	# rotting flesh: damp rather than glossy, so rougher than the living ones
+	var skin := MK.oily_mat(hide, maps[0], maps[1], 2.0, 0.42, true)
+	var bone := MK.dry_mat(bone_c, maps[0], maps[1], 0.7)
+	_mats.append(skin)
+	_mats.append(bone)
+
+	# --- legs: gaunt, one stiffer than the other ---
+	for side in [-1.0, 1.0]:
+		var hip := Node3D.new()
+		hip.position = Vector3(side * 0.17 * s, 0.86 * s, 0)
+		add_child(hip)
+		_legs.append(hip)
+		MK.skinned(hip, MK.sphere_mesh(0.11 * s, 20, 10), skin, Vector3(0, -0.2 * s, 0)).scale = Vector3(1.0, 2.1, 1.0)
+		var knee := Node3D.new()
+		knee.position = Vector3(0, -0.44 * s, 0)
+		hip.add_child(knee)
+		_knees.append(knee)
+		MK.skinned(knee, MK.sphere_mesh(0.09 * s), skin, Vector3(0, -0.16 * s, 0.01 * s)).scale = Vector3(1.0, 2.1, 1.0)
+		var foot := MK.skinned(knee, MK.sphere_mesh(0.1 * s), skin, Vector3(0, -0.38 * s, 0.06 * s))
+		foot.scale = Vector3(1.0, 0.5, 1.7)
+
+	# --- torso: hunched and twisted, one shoulder dropped ---
+	var torso := Node3D.new()
+	torso.position = Vector3(0, 0.86 * s, 0)
+	torso.rotation.x = deg_to_rad(21)
+	torso.rotation.z = deg_to_rad(bad * 7.0)
+	add_child(torso)
+	var gut := MK.skinned(torso, MK.sphere_mesh(0.2 * s, 24, 12), skin, Vector3(0, 0.16 * s, 0))
+	gut.scale = Vector3(1.15, 1.3, 0.85)
+	var chest := MK.skinned(torso, MK.sphere_mesh(0.24 * s, 24, 12), skin, Vector3(0, 0.48 * s, 0))
+	chest.scale = Vector3(1.3, 1.15, 0.8)
+	# ribs showing through on the rotted side
+	if detail:
+		for i in 3:
+			var rib := MK.skinned(torso, MK.sphere_mesh(0.035 * s), bone,
+				Vector3(bad * 0.13 * s, (0.36 + float(i) * 0.1) * s, 0.2 * s))
+			rib.scale = Vector3(2.6, 0.5, 0.8)
+			rib.rotation.z = deg_to_rad(bad * 14.0)
+		# a strip of hide hanging loose
+		var flap := MK.skinned(torso, MK.sphere_mesh(0.1 * s), skin, Vector3(-bad * 0.22 * s, 0.3 * s, 0.17 * s))
+		flap.scale = Vector3(0.5, 1.6, 0.3)
+		flap.rotation.z = deg_to_rad(-bad * 20.0)
+
+	# --- arms: one hangs dead, the other reaches ---
+	for i in 2:
+		var side: float = -1.0 if i == 0 else 1.0
+		var reaching: bool = side == bad
+		var sh := Node3D.new()
+		sh.position = Vector3(side * 0.27 * s, 0.5 * s, 0)
+		# the reaching arm comes up and forward; the dead one just hangs
+		sh.rotation.x = deg_to_rad(-64.0 if reaching else -8.0)
+		sh.rotation.z = deg_to_rad(-side * (14.0 if reaching else 4.0))
+		torso.add_child(sh)
+		_arms.append(sh)
+		_arm_rest.append(sh.rotation.x)
+		MK.skinned(sh, MK.sphere_mesh(0.085 * s, 20, 10), skin, Vector3(0, -0.19 * s, 0)).scale = Vector3(1.0, 2.3, 1.0)
+		MK.skinned(sh, MK.sphere_mesh(0.07 * s), skin, Vector3(0, -0.5 * s, 0.02 * s)).scale = Vector3(1.0, 2.2, 1.0)
+		var hand := MK.skinned(sh, MK.sphere_mesh(0.08 * s), skin, Vector3(0, -0.72 * s, 0.03 * s))
+		hand.scale = Vector3(0.9, 1.0, 0.6)
+		if detail:
+			for f in 3:
+				var fin := MK.skinned(sh, MK.sphere_mesh(0.018 * s), skin,
+					Vector3((float(f) - 1.0) * 0.04 * s, -0.83 * s, 0.04 * s))
+				fin.scale = Vector3(1.0, 2.6, 1.0)
+
+	# --- head: lolling to one side, jaw slack ---
+	var head := Node3D.new()
+	head.position = Vector3(0, 0.74 * s, 0.02 * s)
+	head.rotation.x = deg_to_rad(-14)
+	head.rotation.z = deg_to_rad(-bad * 16.0)
+	torso.add_child(head)
+	var hr := 0.2 * s
+	var skull := MK.skinned(head, MK.sphere_mesh(hr, 24, 12), skin, Vector3.ZERO)
+	skull.scale = Vector3(0.95, 1.1, 1.0)
+	# sunken sockets with a red ember at the back of each
+	for side in [-1.0, 1.0]:
+		var ex: float = side * 0.085 * s
+		var socket := MK.add_mesh(head, MK.sphere_mesh(0.06 * s), Color(0.06, 0.05, 0.04), Vector3(ex, 0.02 * s, hr * 0.86))
+		socket.scale = Vector3(1.15, 1.0, 0.5)
+		# ember in FRONT of the socket, or the dark sphere swallows it
+		MK.add_mesh(head, MK.sphere_mesh(0.032 * s), eye_c, Vector3(ex, 0.02 * s, hr * 1.0), true, 4.0)
+	# slack jaw, hanging open
+	var jaw := MK.skinned(head, MK.sphere_mesh(0.13 * s), skin, Vector3(0, -0.23 * s, hr * 0.66))
+	jaw.scale = Vector3(0.95, 0.7, 0.9)
+	jaw.rotation.x = deg_to_rad(16)
+	# gaping mouth: shallow in Z so the teeth in front of it stay visible
+	var maw := MK.add_mesh(head, MK.sphere_mesh(0.1 * s), Color(0.12, 0.04, 0.05), Vector3(0, -0.14 * s, hr * 0.8))
+	maw.scale = Vector3(1.15, 0.9, 0.42)
+	if detail:
+		for i in 4:
+			var tx := (float(i) - 1.5) * 0.042 * s
+			MK.skinned(head, MK.cone_mesh(0.014 * s, 0.05 * s), bone, Vector3(tx, -0.09 * s, hr * 1.02)).rotation.x = deg_to_rad(180)
+	_batch_body()
+
+## The rattling bones: no flesh to hide behind, so the read is entirely in the
+## gaps — a ribcage you can see through, joints knobbed at both ends, and a skull
+## that is mostly sockets. Rings do the ribcage far cheaper than modelled ribs.
+func _build_bones() -> void:
+	body_scale *= randf_range(0.9, 1.1)
+	var s: float = body_scale
+	var detail := not OS.has_feature("web")
+
+	var tints := [
+		Color(0.86, 0.84, 0.76), Color(0.80, 0.77, 0.66),
+		Color(0.88, 0.86, 0.80), Color(0.75, 0.73, 0.63),
+	]
+	var bone_c: Color = tints[randi() % tints.size()]
+	var eye_c := Color(0.5, 1.0, 0.5)
+
+	var maps := skin_maps("bone", 6060, 0.09, 7070, 0.3)
+	var bone := MK.dry_mat(bone_c, maps[0], maps[1], 0.68)
+	_mats.append(bone)
+
+	# --- leg bones: shaft with a knob at each joint ---
+	for side in [-1.0, 1.0]:
+		var hip := Node3D.new()
+		hip.position = Vector3(side * 0.15 * s, 0.88 * s, 0)
+		add_child(hip)
+		_legs.append(hip)
+		MK.skinned(hip, MK.sphere_mesh(0.06 * s), bone, Vector3.ZERO)
+		MK.skinned(hip, MK.cyl_mesh(0.035 * s, 0.42 * s), bone, Vector3(0, -0.22 * s, 0))
+		var knee := Node3D.new()
+		knee.position = Vector3(0, -0.44 * s, 0)
+		hip.add_child(knee)
+		_knees.append(knee)
+		MK.skinned(knee, MK.sphere_mesh(0.05 * s), bone, Vector3.ZERO)
+		MK.skinned(knee, MK.cyl_mesh(0.03 * s, 0.4 * s), bone, Vector3(0, -0.21 * s, 0))
+		var foot := MK.skinned(knee, MK.sphere_mesh(0.075 * s), bone, Vector3(0, -0.43 * s, 0.05 * s))
+		foot.scale = Vector3(0.9, 0.45, 1.7)
+
+	# --- pelvis, spine, ribcage ---
+	var torso := Node3D.new()
+	torso.position = Vector3(0, 0.88 * s, 0)
+	torso.rotation.x = deg_to_rad(9)
+	add_child(torso)
+	var pelvis := MK.skinned(torso, MK.torus_mesh(0.08 * s, 0.18 * s), bone, Vector3(0, 0.04 * s, 0))
+	pelvis.rotation.x = deg_to_rad(90)
+	pelvis.scale = Vector3(1.0, 1.0, 0.55)
+	# spine: a stack of vertebrae, so the ribcage has something to hang from
+	for i in 6:
+		var v := MK.skinned(torso, MK.sphere_mesh(0.045 * s), bone,
+			Vector3(0, (0.1 + float(i) * 0.095) * s, -0.08 * s))
+		v.scale = Vector3(1.0, 0.7, 1.0)
+	# ribcage: rings tapering toward the shoulders
+	for i in 5:
+		var t := float(i) / 4.0
+		var r := lerpf(0.2, 0.15, t) * s
+		var rib := MK.skinned(torso, MK.torus_mesh(r - 0.022 * s, r), bone,
+			Vector3(0, (0.2 + float(i) * 0.1) * s, -0.02 * s))
+		rib.rotation.x = deg_to_rad(90 - 6)
+		rib.scale = Vector3(1.0, 1.0, 0.62)
+	# shoulder yoke
+	MK.skinned(torso, MK.cyl_mesh(0.028 * s, 0.44 * s), bone, Vector3(0, 0.68 * s, -0.02 * s)).rotation.z = deg_to_rad(90)
+
+	# --- arm bones ---
+	for side in [-1.0, 1.0]:
+		var sh := Node3D.new()
+		sh.position = Vector3(side * 0.22 * s, 0.68 * s, 0)
+		sh.rotation.x = deg_to_rad(-20)
+		sh.rotation.z = deg_to_rad(-side * 8.0)
+		torso.add_child(sh)
+		_arms.append(sh)
+		_arm_rest.append(sh.rotation.x)
+		MK.skinned(sh, MK.sphere_mesh(0.05 * s), bone, Vector3.ZERO)
+		MK.skinned(sh, MK.cyl_mesh(0.028 * s, 0.34 * s), bone, Vector3(0, -0.19 * s, 0))
+		MK.skinned(sh, MK.sphere_mesh(0.04 * s), bone, Vector3(0, -0.38 * s, 0))
+		MK.skinned(sh, MK.cyl_mesh(0.024 * s, 0.32 * s), bone, Vector3(0, -0.56 * s, 0.02 * s))
+		if detail:
+			for f in 3:
+				var fin := MK.skinned(sh, MK.sphere_mesh(0.015 * s), bone,
+					Vector3((float(f) - 1.0) * 0.035 * s, -0.78 * s, 0.03 * s))
+				fin.scale = Vector3(1.0, 2.8, 1.0)
+
+	# --- skull ---
+	var head := Node3D.new()
+	head.position = Vector3(0, 0.82 * s, 0.01 * s)
+	head.rotation.x = deg_to_rad(-9)
+	torso.add_child(head)
+	var hr := 0.17 * s
+	MK.skinned(head, MK.cyl_mesh(0.03 * s, 0.1 * s), bone, Vector3(0, -0.14 * s, -0.02 * s))
+	var cranium := MK.skinned(head, MK.sphere_mesh(hr, 24, 12), bone, Vector3.ZERO)
+	cranium.scale = Vector3(1.0, 1.05, 1.15)
+	# sockets: dark hollows with a green ember sat deep inside
+	for side in [-1.0, 1.0]:
+		var ex: float = side * 0.075 * s
+		# big dark hollow dominates; the ember is a small glow inside it, not a
+		# pupil sat on top of it
+		var socket := MK.add_mesh(head, MK.sphere_mesh(0.072 * s), Color(0.04, 0.05, 0.04),
+			Vector3(ex, 0.02 * s, hr * 0.8))
+		socket.scale = Vector3(1.05, 1.15, 0.55)
+		MK.add_mesh(head, MK.sphere_mesh(0.02 * s), eye_c, Vector3(ex, 0.01 * s, hr * 0.9), true, 3.0)
+	# nasal hollow and a fixed grin of teeth
+	MK.add_mesh(head, MK.sphere_mesh(0.03 * s), Color(0.05, 0.06, 0.05), Vector3(0, -0.05 * s, hr * 0.92)).scale = Vector3(0.7, 1.2, 0.5)
+	var jaw := MK.skinned(head, MK.sphere_mesh(0.13 * s), bone, Vector3(0, -0.15 * s, hr * 0.4))
+	jaw.scale = Vector3(0.95, 0.55, 0.95)
+	if detail:
+		for i in 6:
+			var tx := (float(i) - 2.5) * 0.032 * s
+			MK.skinned(head, MK.sphere_mesh(0.016 * s), bone, Vector3(tx, -0.1 * s, hr * 0.82)).scale = Vector3(1.0, 1.4, 0.7)
 	_batch_body()
 
 ## Batch a finished procedural body. Each animated joint collapses on its own so
