@@ -7,6 +7,8 @@ const MK = preload("res://scripts/meshkit.gd")
 ## How far from the coop he'll pursue before returning to his post.
 const LEASH := 20.0
 
+const CL = preload("res://scripts/classes.gd")
+
 var game: Node3D
 # strut | to_perch | perch | swoop
 var state := "strut"
@@ -19,6 +21,21 @@ var _wings: Array = []
 var _legs: Array = []
 var _stride := 0.0
 var perch := Vector3(20.0, 3.15, -12.0)
+## Roosters upgrade along the same track system as the hens, on their own class
+## line — he already divebombs, so the tracks sharpen that rather than replacing
+## it. Kept identical in shape to the hen fields so one screen drives both.
+var class_id := "rooster"
+var spec_id := ""
+var tracks := {}
+var stats := {}
+
+func refresh_class() -> void:
+	if tracks.is_empty():
+		tracks = CL.new_tracks()
+	stats = CL.stats("rooster", spec_id, tracks)
+
+func title() -> String:
+	return CL.title("rooster", spec_id, tracks)
 
 func setup(g: Node3D, pos: Vector3) -> void:
 	game = g
