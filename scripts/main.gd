@@ -263,7 +263,6 @@ func _build_world() -> void:
 	path.material_override = MK.tex_mat(Color(0.9, 0.82, 0.62), _ground_tex, 3.0, 1.0, _ground_norm)
 	_build_house()
 	_build_coop()
-	_build_run_fence()
 	_build_perimeter_fence()
 	_build_forest()
 	_build_grass()
@@ -323,22 +322,6 @@ func _build_coop() -> void:
 func _tex_wall(size: Vector3, pos: Vector3, m: Material) -> void:
 	MK.static_box(self, size, pos)
 	MK.box(self, size, Color.WHITE, pos).material_override = m
-
-func _build_run_fence() -> void:
-	var wire := Color(0.75, 0.75, 0.78, 0.4)
-	# A pen on the door side of the coop, open where it meets the wall so the
-	# hens can get in and out. Three sides, sized off the coop rather than
-	# hardcoded, so the run follows if the coop is ever moved again.
-	var cx: float = coop_pos.x
-	var cz: float = coop_pos.z
-	var east := cx - 1.8
-	var west := cx - 10.0
-	var half := 5.0
-	var mid := (east + west) * 0.5
-	var span := east - west
-	MK.box(self, Vector3(span, 1.1, 0.06), wire, Vector3(mid, 0.55, cz - half))
-	MK.box(self, Vector3(span, 1.1, 0.06), wire, Vector3(mid, 0.55, cz + half))
-	MK.box(self, Vector3(0.06, 1.1, half * 2.0), wire, Vector3(west, 0.55, cz))
 
 func _build_perimeter_fence() -> void:
 	fence_mat = MK.tex_mat(Color(0.85, 0.62, 0.38), _wood_tex, 1.5, 0.95, _wood_norm)
