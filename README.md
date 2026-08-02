@@ -12,8 +12,15 @@ Built with **Godot 4.7** (all placeholder models are procedural — no assets ne
 **[Play in your browser →](https://fluffychainsaws.github.io/last-chicken-defense/)**
 
 Every push to `main` exports the Web build and publishes it to GitHub Pages.
-The browser build uses the WebGL2 (compatibility) renderer and ships without
-`models/*.glb`, so the goblin falls back to its procedural placeholder there.
+
+**Windows:** grab `LastChickenDefense-windows` from the artifacts of the latest
+[Build run](https://github.com/fluffychainsaws/last-chicken-defense/actions).
+It's one self-contained `.exe` — no installer, no data folder.
+
+The desktop build is the one that looks right. Browsers have no Vulkan, so the
+web build runs the `gl_compatibility` renderer and loses clearcoat, volumetric
+fog, SSAO and SSIL; its preset also strips `models/*.glb`, so the goblin falls
+back to its procedural stand-in there. Desktop gets all of it.
 
 ## Run it
 
@@ -48,6 +55,18 @@ godot --path .
 - A random themed wave attacks: they chew the fence, grab chickens, and haul
   them into the dark. Bosses appear every 4th night (red moon).
 - Lose every chicken and it's over. The Armaeggin has come.
+
+## Dev tools
+
+Neither ships in an exported build — both are excluded by the export presets.
+
+```
+# render a row of any enemy theme to a PNG, without waiting for the right wave
+xvfb-run -a godot --path . --script scripts/preview_enemy.gd -- midget
+
+# print a .glb's node tree, bounds and animations
+godot --headless --path . --script scripts/inspect_model.gd -- res://models/goblin.glb
+```
 
 ## Roadmap
 - [ ] Co-op up to 8 players (Godot high-level multiplayer / ENet — host authoritative)
