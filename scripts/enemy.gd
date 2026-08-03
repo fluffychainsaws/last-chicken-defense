@@ -6,10 +6,11 @@ const MK = preload("res://scripts/meshkit.gd")
 ## Authored models, used in place of the procedural build when present.
 const GOBLIN_MODEL_PATH := "res://models/goblin.glb"
 ## Measured from the source .glb: full height, and distance from origin down to the feet.
-const GOBLIN_MODEL_HEIGHT := 1.903
-const GOBLIN_MODEL_FOOT_OFFSET := 0.955
+## This rig's feet already sit at the mesh origin and it already faces +Z.
+const GOBLIN_MODEL_HEIGHT := 1.7
+const GOBLIN_MODEL_FOOT_OFFSET := 0.0
 ## Yaw correction so the model's face points along +Z like the procedural enemies.
-const GOBLIN_MODEL_YAW := 180.0
+const GOBLIN_MODEL_YAW := 0.0
 
 const THEMES := [
 	{"id": "zombie", "name": "THE SHUFFLING DEAD", "sub": "they smell the eggs", "body": Color(0.35, 0.49, 0.29), "eye": Color(1, 0.15, 0.15), "scale": 1.0, "speed": 2.2, "hp": 50.0, "dmg": 8.0, "bounty": 4, "base": 5.0, "per": 1.6},
@@ -150,8 +151,9 @@ func _build_goblin() -> void:
 		return
 	_build_goblin_procedural(s)
 
-## The source .glb has no vertex normals, so lighting renders it black. Build the
-## normals once with SurfaceTool and share the result across every goblin.
+## Pull the rigged mesh's rest-pose geometry out once with SurfaceTool and
+## share the result across every goblin — there is no baked animation to
+## drive the skeleton, so the bind pose is the pose.
 static var _goblin_mesh_cache: Mesh = null
 static var _goblin_xform_cache := Transform3D.IDENTITY
 static var _goblin_prepared := false
@@ -168,7 +170,6 @@ static func goblin_mesh() -> Mesh:
 		_goblin_xform_cache = src.transform
 		var st := SurfaceTool.new()
 		st.create_from(src.mesh, 0)
-		st.generate_normals()
 		_goblin_mesh_cache = st.commit()
 	root.free()
 	return _goblin_mesh_cache
@@ -201,8 +202,7 @@ func _build_goblin_model(s: float) -> void:
 	holder.position.y = GOBLIN_MODEL_FOOT_OFFSET * ms
 	holder.rotation.y = deg_to_rad(GOBLIN_MODEL_YAW)
 	add_child(holder)
-	# The source .glb carries no UVs, vertex colors or texture (geometry-only
-	# export), so skin it here. Triplanar mapping works without UVs.
+	# The source .glb ships with no material, so skin it here.
 	var skins := [
 		Color(0.42, 0.60, 0.24), Color(0.34, 0.52, 0.22), Color(0.52, 0.66, 0.30),
 		Color(0.26, 0.47, 0.29), Color(0.28, 0.55, 0.55),
