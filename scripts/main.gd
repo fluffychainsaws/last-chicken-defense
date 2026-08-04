@@ -86,6 +86,9 @@ var upgrades := {"fence": 0, "coop": 0, "helmets": false, "turret": false, "roos
 var coop_hp := 300.0
 var coop_broken := false
 var night_theme := {}
+## True for the rest of the day once the player has killed a hen. The flock
+## stares him down for the first kill; the rooster punishes any kill after that.
+var flock_vigilant := false
 
 ## The coop sits in the middle of the yard with its run around the door, so the
 ## hens defend from the centre rather than from one corner. Geometry below is
@@ -147,7 +150,7 @@ func _ready() -> void:
 func _setup_input() -> void:
 	var defs := {
 		"move_forward": KEY_W, "move_back": KEY_S, "move_left": KEY_A, "move_right": KEY_D,
-		"sprint": KEY_SHIFT, "jump": KEY_SPACE, "interact": KEY_E,
+		"sprint": KEY_SHIFT, "jump": KEY_SPACE, "interact": KEY_E, "post": KEY_F,
 		"slot1": KEY_1, "slot2": KEY_2, "slot3": KEY_3, "slot4": KEY_4,
 	}
 	for action_name in defs:
@@ -603,6 +606,7 @@ func _start_night() -> void:
 func _start_dawn() -> void:
 	is_night = false
 	day_num += 1
+	flock_vigilant = false
 	for e in enemies.duplicate():
 		e.ignite()
 	moon.visible = false
@@ -694,6 +698,17 @@ func melee_attack(origin: Vector3, dir: Vector3) -> void:
 		if d < best_d and to.normalized().dot(dir) > 0.5:
 			best = e
 			best_d = d
+	# friendly fire is a day-only mistake — at night the flock is either
+	# hidden or already fighting for its life
+	if is_day():
+		for c in chickens:
+			if not c.targetable():
+				continue
+			var to: Vector3 = c.position + Vector3(0, 0.5, 0) - origin
+			var d := to.length()
+			if d < best_d and to.normalized().dot(dir) > 0.5:
+				best = c
+				best_d = d
 	if best != null:
 		best.damage(25.0)
 
@@ -713,6 +728,19 @@ func shotgun_attack(origin: Vector3, dir: Vector3) -> void:
 			if perp < 0.7 * maxf(1.0, e.body_scale):
 				best = e
 				best_t = t
+		if is_day():
+			for c in chickens:
+				if not c.targetable():
+					continue
+				var center: Vector3 = c.position + Vector3(0, 0.5, 0)
+				var to := center - origin
+				var t := to.dot(pd)
+				if t < 0.5 or t > best_t:
+					continue
+				var perp := (to - pd * t).length()
+				if perp < 0.55:
+					best = c
+					best_t = t
 		if best != null:
 			best.damage(10.0)
 
@@ -747,10 +775,14 @@ func hen_shot(from: Node3D, target: Node3D, dmg: float, st: Dictionary) -> void:
 	var head: Vector3 = from.position + Vector3(0, 0.55, 0)
 	var aim: Vector3 = (target.position + Vector3(0, 0.8, 0) - head).normalized()
 	var shots: int = maxi(int(st.get("shots", 1)), 1)
+	# a green military hen starts wide of the mark; rank (any track) tightens it
+	var wob: float = 1.0 - float(st.get("accuracy", 1.0))
 	for i in shots:
 		var spread := Vector3.ZERO
 		if shots > 1:
 			spread = Vector3(randf_range(-0.12, 0.12), randf_range(-0.05, 0.05), randf_range(-0.12, 0.12))
+		if wob > 0.0:
+			spread += Vector3(randf_range(-wob, wob), randf_range(-wob, wob) * 0.4, randf_range(-wob, wob)) * 0.4
 		var col: Color = st.get("shot_colour", Color(0.95, 0.95, 0.8))
 		var m := MK.add_mesh(self, MK.sphere_mesh(0.09, 8, 4), col, head + aim * 0.6, true, 1.6)
 		projectiles.append({
@@ -933,8 +965,16 @@ func _update_pickups() -> void:
 
 # ---------------- queries ----------------
 
+## Uniform across the yard, but rerolled off the coop and kiosk footprints so
+## wandering birds spread through the fence line instead of piling up on the
+## buildings they'd otherwise walk straight through.
 func rand_in_yard() -> Vector3:
-	return Vector3(randf_range(YARD.min_x + 3.0, YARD.max_x - 3.0), 0, randf_range(YARD.min_z + 3.0, YARD.max_z - 3.0))
+	var p := Vector3.ZERO
+	for i in 8:
+		p = Vector3(randf_range(YARD.min_x + 3.0, YARD.max_x - 3.0), 0, randf_range(YARD.min_z + 3.0, YARD.max_z - 3.0))
+		if p.distance_to(coop_pos) > 5.0 and p.distance_to(kiosk_pos) > 3.0:
+			break
+	return p
 
 func in_yard(x: float, z: float) -> bool:
 	return x > YARD.min_x and x < YARD.max_x and z > YARD.min_z and z < YARD.max_z
@@ -1084,10 +1124,24 @@ func _spawn_rooster(pos: Vector3) -> void:
 func chicken_died(c: Node3D) -> void:
 	if not chickens.has(c):
 		return
+	# only the player's own weapons can kill a chicken outright — anything an
+	# enemy does to one is a carry-off, handled by chicken_taken() instead
+	var was_vigilant := flock_vigilant and is_day()
 	chickens.erase(c)
 	spawn_poof(c.position + Vector3(0, 0.4, 0), Color(0.95, 0.92, 0.85), 12)
 	c.queue_free()
-	ui.whisper("a chicken has fallen")
+	if is_day():
+		if was_vigilant:
+			if roosters.size() > 0:
+				roosters[0].punish_player()
+			ui.announce("THE ROOSTER REMEMBERS", "he warned you")
+		else:
+			flock_vigilant = true
+			for other in chickens:
+				other.start_judging()
+			ui.whisper("the flock has noticed")
+	else:
+		ui.whisper("a chicken has fallen")
 	ui.refresh()
 	_check_game_over()
 

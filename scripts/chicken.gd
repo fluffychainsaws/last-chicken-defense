@@ -41,6 +41,14 @@ var _gear_pos := Vector3.ZERO
 var _legs: Array = []
 var _stride := 0.0
 var _head_base_z := 0.22
+var _eyes: Array = []
+## Set by the player with [F]: overrides the random guard post so a hen holds
+## an exact spot (the coop doorway, a chokepoint) instead of wherever she rolls.
+var has_manual_post := false
+var _manual_post := Vector3.ZERO
+## Counts down after the flock witnesses a killing; frozen and staring at the
+## player for the duration, independent of whatever state she was mid-doing.
+var _judging_t := 0.0
 
 func setup(g: Node3D, pos: Vector3, chick: bool) -> void:
 	game = g
@@ -104,7 +112,7 @@ func _build_mesh() -> void:
 	for side in [-1.0, 1.0]:
 		var er := randf_range(0.06, 0.105)
 		var epos := Vector3(side * 0.08, 0.04 + randf_range(-0.015, 0.03), 0.06)
-		MK.sphere(_head, er, Color(0.97, 0.96, 0.93), epos)
+		_eyes.append(MK.sphere(_head, er, Color(0.97, 0.96, 0.93), epos))
 		MK.sphere(_head, er * 0.42, Color(0.05, 0.04, 0.04), epos + Vector3(randf_range(-0.025, 0.025), randf_range(-0.025, 0.02), er * 0.82))
 	# beak, permanently mid-squawk
 	var top_beak := MK.cyl(_head, 0.0, 0.042, 0.16, Color(0.95, 0.6, 0.1), Vector3(0, -0.01, 0.15))
@@ -175,12 +183,32 @@ func remove_helmet() -> void:
 			g.queue_free()
 	_gear.clear()
 
-## Somewhere near the coop to stand watch, held until the timer runs out.
+## Somewhere out in the yard to stand watch, held until the timer runs out.
+## Kept well clear of the coop's own footprint so guards spread through the
+## fence line instead of piling up against the building.
 func _pick_post() -> void:
 	var a := randf() * TAU
-	var r := randf_range(2.2, 4.8)
-	_post = game.coop_door + Vector3(cos(a) * r, 0, sin(a) * r)
+	var r := randf_range(7.0, 15.0)
+	var p: Vector3 = game.coop_door + Vector3(cos(a) * r, 0, sin(a) * r)
+	p.x = clampf(p.x, game.YARD.min_x + 2.0, game.YARD.max_x - 2.0)
+	p.z = clampf(p.z, game.YARD.min_z + 2.0, game.YARD.max_z - 2.0)
+	_post = p
 	_timer = randf_range(4.0, 8.0)
+
+## Pinned by the player with [F]. Held indefinitely, in place of the random roll.
+func set_manual_post(pos: Vector3) -> void:
+	has_manual_post = true
+	_manual_post = pos
+	_post = pos
+
+func clear_manual_post() -> void:
+	has_manual_post = false
+	_pick_post()
+
+## The flock's reaction after the player kills one of their own: everyone
+## freezes and stares for the duration, whatever they were doing.
+func start_judging() -> void:
+	_judging_t = 10.0
 
 func targetable() -> bool:
 	return state != "in_coop" and state != "carried"
@@ -190,6 +218,9 @@ func tick(delta: float) -> void:
 	_attack_cd -= delta
 	_summon_cd -= delta
 	_peck_t += delta
+	var squint_target := 0.32 if _judging_t > 0.0 else 1.0
+	for e in _eyes:
+		e.scale.y = lerpf(e.scale.y, squint_target, delta * 6.0)
 	if is_chick and not game.is_night:
 		age += delta
 		var s: float = lerpf(0.45, 1.0, clampf(age / 340.0, 0.0, 1.0))
@@ -199,6 +230,14 @@ func tick(delta: float) -> void:
 			hp = 25.0
 			max_hp = 25.0
 			scale = Vector3.ONE
+	if _judging_t > 0.0 and state != "carried" and state != "in_coop":
+		_judging_t -= delta
+		var to_player: Vector3 = game.player.position - position
+		to_player.y = 0.0
+		if to_player.length() > 0.05:
+			rotation.y = atan2(to_player.x, to_player.z)
+		_settle_legs(delta)
+		return
 	match state:
 		"carried", "in_coop":
 			return
@@ -287,7 +326,9 @@ func tick(delta: float) -> void:
 				_head.rotation.x = maxf(0.0, sin(_peck_t * 10.0)) * 1.2
 				_fire_at(enemy, delta)
 			else:
-				if _timer <= 0.0 or _post == Vector3.ZERO:
+				if has_manual_post:
+					_post = _manual_post
+				elif _timer <= 0.0 or _post == Vector3.ZERO:
 					_pick_post()
 				_walk_toward(_post, 1.6, delta)
 		"panic":

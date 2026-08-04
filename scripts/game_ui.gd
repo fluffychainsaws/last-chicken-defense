@@ -251,7 +251,11 @@ func refresh() -> void:
 
 func update_hotbar() -> void:
 	var names := ["SHOVEL", "SHOTGUN", "FEED", "EGG"]
-	var counts := ["", ("x%d" % game.shells) if game.upgrades.shotgun else "LOCKED", "x%d" % game.feed, "x%d" % game.eggs]
+	var shotgun_txt := "LOCKED"
+	if game.upgrades.shotgun:
+		var pl = game.player
+		shotgun_txt = "RELOADING" if pl.reloading else "%d/%d" % [pl.shotgun_mag, game.shells]
+	var counts := ["", shotgun_txt, "x%d" % game.feed, "x%d" % game.eggs]
 	for i in 4:
 		var s = _hotbar_slots[i]
 		s.label.text = "%d  %s %s" % [i + 1, names[i], counts[i]]

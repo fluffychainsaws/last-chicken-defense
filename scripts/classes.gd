@@ -92,7 +92,7 @@ const CLASSES := {
 	},
 	"military": {
 		"name": "Military Hen", "desc": "sits on the coop roof with a gun. do not ask.",
-		"price": 320, "dmg": 8.0, "range": 22.0, "cd": 0.5, "hp": 30.0,
+		"price": 320, "dmg": 8.0, "range": 22.0, "cd": 1.6, "hp": 30.0,
 		"speed": 0.9, "armor": 0.1, "dodge": 0.0, "ranged": true, "perch": true,
 		"colour": Color(0.36, 0.42, 0.3),
 		"specs": {
@@ -172,9 +172,15 @@ static func stats(class_id: String, spec_id: String, tracks: Dictionary) -> Dict
 	var armor: float = clampf(float(b["armor"]) + float(sp.get("armor", 0.0)) + t.call("armor"), 0.0, 0.85)
 	var dodge: float = clampf(float(b["dodge"]) + float(sp.get("dodge", 0.0)) + t.call("dodge"), 0.0, 0.6)
 	var speed: float = float(b["speed"]) * float(sp.get("speed", 1.0)) * (1.0 + t.call("move"))
+	# fresh off the roof, a military hen sprays wide; rank earned in any track
+	# is time spent drilling, so it tightens up as she levels regardless of
+	# where the points went
+	var accuracy := 1.0
+	if class_id == "military":
+		accuracy = clampf(0.5 + 0.055 * float(rank_index(tracks)), 0.5, 1.0)
 	return {
 		"dmg": dmg, "cd": maxf(cd, 0.08), "range": rng, "hp": hp,
-		"armor": armor, "dodge": dodge, "speed": speed,
+		"armor": armor, "dodge": dodge, "speed": speed, "accuracy": accuracy,
 		"ranged": bool(b.get("ranged", false)),
 		"perch": bool(b.get("perch", false)),
 		"shots": int(sp.get("shots", 1)),

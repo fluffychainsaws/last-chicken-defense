@@ -107,6 +107,12 @@ func tick(delta: float) -> void:
 	for i in _wings.size():
 		var flap := sin(_anim_t * 18.0) * 0.7 if flying else 0.0
 		_wings[i].rotation.z = flap * (1.0 if i == 0 else -1.0)
+	# after the player kills a hen, he shadows her the rest of the day instead
+	# of strutting his usual route — watching, not policing yet
+	if game.is_day() and game.flock_vigilant:
+		state = "strut"
+		_walk_toward(game.player.position + Vector3(1.3, 0, 1.3), 1.6, delta)
+		return
 	match state:
 		"strut":
 			if game.is_night:
@@ -130,6 +136,12 @@ func tick(delta: float) -> void:
 				return
 			rotation.y += delta * 0.5  # slow menacing scan
 			position = perch
+			# feet shift under him as he turns, instead of pivoting on a fixed spot
+			_stride += delta * 1.6
+			var shift := sin(_stride) * 0.18
+			if _legs.size() == 2:
+				_legs[0].rotation.x = shift
+				_legs[1].rotation.x = -shift
 			var e = game.nearest_enemy(game.coop_pos, 8.5)
 			if e != null and game.enemies.has(e):
 				_victim = e
@@ -156,6 +168,14 @@ func tick(delta: float) -> void:
 					game.spawn_poof(aim, Color(0.08, 0.09, 0.12), 5)
 					game.sfx.play("hit", -4.0)
 					_victim.damage(9.0)
+
+## The second hen the player shoots on a vigilant day earns them a beating.
+func punish_player() -> void:
+	if not game.is_day():
+		return
+	game.damage_player(50.0)
+	game.spawn_poof(game.player.position + Vector3(0, 1, 0), Color(0.08, 0.09, 0.12), 8)
+	game.sfx.play("hit", -2.0)
 
 func _walk_toward(dest: Vector3, speed: float, delta: float) -> bool:
 	var d := Vector3(dest.x - position.x, 0, dest.z - position.z)

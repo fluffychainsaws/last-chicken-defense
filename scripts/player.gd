@@ -14,6 +14,13 @@ var _fire_cd := 0.0
 var _vm: Array = []
 var _vm_root: Node3D
 
+## Pump gun: two in the tube, then a forced pause before the reserve refills it.
+const SHOTGUN_MAG := 2
+const SHOTGUN_RELOAD_TIME := 1.6
+var shotgun_mag := SHOTGUN_MAG
+var reloading := false
+var _reload_t := 0.0
+
 const GRAVITY := 18.0
 
 func setup(g: Node3D) -> void:
@@ -92,12 +99,22 @@ func _physics_process(delta: float) -> void:
 	if game == null or game.paused:
 		return
 	_fire_cd -= delta
+	if reloading:
+		_reload_t -= delta
+		if _reload_t <= 0.0:
+			reloading = false
+			var take := mini(SHOTGUN_MAG - shotgun_mag, game.shells)
+			shotgun_mag += take
+			game.shells -= take
+			game.ui.refresh()
 	if _swing_t > 0.0:
 		_swing_t -= delta * 3.5
 		_vm_root.rotation.x = -sin(maxf(0.0, _swing_t) * PI) * 1.1
 	for i in 4:
 		if Input.is_action_just_pressed("slot%d" % (i + 1)):
 			set_slot(i)
+	if Input.is_action_just_pressed("post"):
+		_try_post_chicken()
 	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var dir := (transform.basis * Vector3(input_dir.x, 0, input_dir.y))
 	if dir.length() > 0.01:
@@ -140,9 +157,13 @@ func _interact_scan() -> void:
 		prompt = "[E]  THE ROOST  (train the flock)"
 	else:
 		var c = game.nearest_chicken(position, 2.8)
-		if c != null and game.is_day():
-			ctx = "chicken"
-			prompt = ("[E]  RECALL FORAGER" if c.forager else "[E]  SEND TO FORAGE")
+		if c != null:
+			if game.is_day():
+				ctx = "chicken"
+				prompt = ("[E]  RECALL FORAGER" if c.forager else "[E]  SEND TO FORAGE")
+			if c.helmeted:
+				var post_hint := "[F]  UNPOST" if c.has_manual_post else "[F]  POST HERE"
+				prompt = (prompt + "   " + post_hint) if prompt != null else post_hint
 	game.ui.set_prompt(prompt)
 	if ctx == "repair" and Input.is_action_pressed("interact"):
 		game.repair_coop(get_physics_process_delta_time())
@@ -176,15 +197,22 @@ func _use_item() -> void:
 			game.sfx.play("swing")
 			game.melee_attack(cam.global_position, -cam.global_transform.basis.z)
 		1:
-			if not game.upgrades.shotgun or game.shells <= 0:
+			if not game.upgrades.shotgun:
 				game.sfx.play("denied")
+				return
+			if reloading:
+				return
+			if shotgun_mag <= 0:
+				_start_reload()
 				return
 			_fire_cd = 0.9
 			_swing_t = 0.6
-			game.shells -= 1
+			shotgun_mag -= 1
 			game.sfx.play("shot", -4.0)
 			game.shotgun_attack(cam.global_position, -cam.global_transform.basis.z)
 			game.ui.refresh()
+			if shotgun_mag <= 0:
+				_start_reload()
 		2:
 			if game.feed <= 0:
 				game.sfx.play("denied")
@@ -202,6 +230,28 @@ func _use_item() -> void:
 			game.sfx.play("egg")
 			game.throw_projectile("egg", cam.global_position, -cam.global_transform.basis.z)
 			game.ui.refresh()
+
+func _start_reload() -> void:
+	if reloading or game.shells <= 0 or shotgun_mag >= SHOTGUN_MAG:
+		return
+	reloading = true
+	_reload_t = SHOTGUN_RELOAD_TIME
+	game.sfx.play("swing", -6.0)
+
+## Walk up to a helmeted hen and press [F] to pin her guard post to wherever
+## you're standing, or clear it to hand post-picking back to her.
+func _try_post_chicken() -> void:
+	var c = game.nearest_chicken(position, 3.0)
+	if c == null or not c.helmeted:
+		return
+	if c.has_manual_post:
+		c.clear_manual_post()
+		game.sfx.play("denied", -6.0)
+		game.ui.whisper("post cleared")
+	else:
+		c.set_manual_post(position)
+		game.sfx.play("buy", -6.0)
+		game.ui.whisper("posted")
 
 func take_damage(n: float) -> void:
 	hp -= n
