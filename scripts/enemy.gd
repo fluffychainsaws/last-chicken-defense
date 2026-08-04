@@ -42,7 +42,14 @@ const THEMES := [
 ## Every non-boss theme now has a body of its own, so the opening nights no
 ## longer need steering away from the shared placeholder — the whole roster is
 ## fair game from night one again.
+## TEMPORARY (testing): forces every night to be goblins so the rigged model
+## can be checked without rerolling for it. Set back to false to restore the
+## normal random rotation.
+static var force_goblins := true
+
 static func pick_theme(night: int) -> Dictionary:
+	if force_goblins:
+		return THEMES.filter(func(t): return t.id == "goblin")[0]
 	var bosses := THEMES.filter(func(t): return t.get("boss", false) and night >= t.get("min_night", 99))
 	var normals := THEMES.filter(func(t): return not t.get("boss", false))
 	if night % 4 == 0 and bosses.size() > 0:
