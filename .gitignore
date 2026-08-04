@@ -2,3 +2,20 @@
 *.tmp
 builds/
 build/
+
+# Godot imports .glb models with "Extract Textures", which writes the embedded
+# images out beside the model as loose .png/.jpg files. They are derived from
+# the .glb — which already contains them — so committing them would duplicate
+# tens of megabytes that are regenerated on first import anyway. Every real
+# source asset in models/ is a .glb; anything else in there is generated.
+#
+# Do not delete these from a working tree without also clearing .godot/imported/
+# for that model: Godot skips re-importing when the source .glb is unchanged,
+# and the cached scene keeps a hard reference to the missing texture, which
+# fails the model's load outright.
+models/*.png
+models/*.png.import
+models/*.jpg
+models/*.jpg.import
+models/*.jpeg
+models/*.jpeg.import
