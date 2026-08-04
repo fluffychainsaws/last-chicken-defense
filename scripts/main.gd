@@ -101,6 +101,14 @@ var coop_door := Vector3(1.6, 0, 0)
 ## The upgrade kiosk stands beside the coop rather than on it, so training the
 ## flock is its own place in the yard instead of a second use of the building.
 var kiosk_pos := Vector3(0.4, 0.0, 3.4)
+## Full-length mirror on the bedroom's north wall. Its reflection is a second
+## copy of the chosen farmer rendered into a SubViewport, so it can keep the
+## hat the first-person body has to drop.
+var mirror_pos := Vector3.ZERO
+var _mirror_vp: SubViewport = null
+var _mirror_model: Node3D = null
+var _mirror_anim: AnimationPlayer = null
+var _mirror_gender := ""
 var computer_pos := Vector3(-24.2, 1.0, -12)
 var bed_pos := Vector3(-16.6, 0.0, -14.6)
 var sleeping := false
@@ -307,6 +315,7 @@ func _build_house() -> void:
 	MK.box(self, Vector3(1.8, 0.06, 1.0), Color(0.9, 0.88, 0.85), bed_pos + Vector3(0, 0.67, 0.85))
 	MK.box(self, Vector3(0.9, 0.16, 0.45), Color(0.95, 0.94, 0.9), bed_pos + Vector3(0, 0.72, -1.05))
 	MK.box(self, Vector3(2.0, 0.9, 0.12), Color.WHITE, bed_pos + Vector3(0, 0.6, -1.45)).material_override = frame_m
+	_build_mirror(Vector3(hx - 2.0, 0.0, hz - 4.78))
 	# desk + computer
 	MK.static_box(self, Vector3(1.0, 0.9, 2.2), Vector3(hx - 4.6, 0.45, hz), Color(0.5, 0.36, 0.2))
 	MK.box(self, Vector3(0.12, 0.6, 0.9), Color(0.12, 0.12, 0.14), Vector3(hx - 4.8, 1.35, hz))
@@ -349,6 +358,129 @@ func _build_kiosk() -> void:
 	var screen := MK.box(k, Vector3(0.9, 0.5, 0.05), Color(0.45, 0.95, 0.6), Vector3(0, 1.62, -0.22), true)
 	screen.material_override.emission_energy_multiplier = 1.1
 	MK.box(k, Vector3(0.5, 0.12, 0.5), Color(0.6, 0.5, 0.3), Vector3(0.6, 1.24, 0.1))
+
+## A full-length mirror. Not a real planar reflection — it renders a second
+## copy of the farmer into a SubViewport and paints that onto the glass. That
+## costs one small viewport instead of re-rendering the whole yard, and it is
+## the copy that keeps its hat, since the body worn in first person has its
+## head collapsed to clear the brim.
+func _build_mirror(pos: Vector3) -> void:
+	mirror_pos = pos
+	var frame_m := MK.tex_mat(Color(0.42, 0.28, 0.16), _wood_tex, 2.0, 0.9, _wood_norm)
+	var m := Node3D.new()
+	m.position = pos
+	add_child(m)
+	# frame: uprights, top and bottom rail
+	for side in [-1.0, 1.0]:
+		MK.box(m, Vector3(0.12, 2.3, 0.12), Color.WHITE, Vector3(side * 0.66, 1.2, -0.06)).material_override = frame_m
+	for y in [0.06, 2.34]:
+		MK.box(m, Vector3(1.44, 0.12, 0.12), Color.WHITE, Vector3(0, y, -0.06)).material_override = frame_m
+
+	_mirror_vp = SubViewport.new()
+	_mirror_vp.size = Vector2i(320, 640)
+	_mirror_vp.transparent_bg = false
+	_mirror_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	# Without this the viewport borrows the yard's World3D, and the reflected
+	# farmer is a real body standing in the bedroom rather than an image on
+	# the glass. Its own world also keeps the mirror's lighting to itself.
+	_mirror_vp.own_world_3d = true
+	add_child(_mirror_vp)
+	var cam := Camera3D.new()
+	_mirror_vp.add_child(cam)
+	cam.fov = 42
+	cam.look_at_from_position(Vector3(0, 1.15, 2.9), Vector3(0, 1.0, 0), Vector3.UP)
+	var key := DirectionalLight3D.new()
+	key.rotation_degrees = Vector3(-42, -28, 0)
+	key.light_energy = 1.35
+	_mirror_vp.add_child(key)
+	var fill := DirectionalLight3D.new()
+	fill.rotation_degrees = Vector3(-15, 140, 0)
+	fill.light_energy = 0.5
+	_mirror_vp.add_child(fill)
+	var env_node := WorldEnvironment.new()
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.09, 0.09, 0.11)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.5, 0.5, 0.56)
+	env.ambient_light_energy = 0.9
+	env_node.environment = env
+	_mirror_vp.add_child(env_node)
+
+	# A QuadMesh, not a box: Godot packs a box's six faces into one UV atlas,
+	# so a box front shows a crop of the texture rather than the whole frame.
+	# A quad maps 0..1 across its single face, and already faces +Z.
+	var glass := MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(1.2, 2.16)
+	glass.mesh = qm
+	glass.position = Vector3(0, 1.2, 0.015)
+	m.add_child(glass)
+	var gm := StandardMaterial3D.new()
+	gm.albedo_texture = _mirror_vp.get_texture()
+	# the viewport is already lit; shading it again would only muddy it
+	gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glass.material_override = gm
+	MK.static_box(self, Vector3(1.44, 2.4, 0.16), pos + Vector3(0, 1.2, -0.06))
+
+## Swaps the reflected body to match the chosen farmer. Called when a game
+## begins, since the house is built long before the character is picked.
+func refresh_mirror() -> void:
+	if _mirror_vp == null:
+		return
+	var want: String = player_gender if player_gender in ["male", "female"] else "male"
+	if want == _mirror_gender and _mirror_model != null:
+		return
+	if _mirror_model != null:
+		_mirror_model.queue_free()
+		_mirror_model = null
+		_mirror_anim = null
+	var path := "res://models/farmer_male.glb" if want == "male" else "res://models/farmer_female.glb"
+	if not ResourceLoader.exists(path):
+		return
+	_mirror_gender = want
+	_mirror_model = load(path).instantiate()
+	_mirror_vp.add_child(_mirror_model)
+	_mirror_anim = _find_anim_in(_mirror_model)
+	if _mirror_anim != null:
+		for clip in [_mirror_idle(), "Walking", "Running"]:
+			if _mirror_anim.has_animation(clip):
+				_mirror_anim.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
+		_mirror_anim.play(_mirror_idle())
+
+func _mirror_idle() -> String:
+	return "Idle_02" if _mirror_gender == "male" else "Idle_15"
+
+static func _find_anim_in(n: Node) -> AnimationPlayer:
+	if n is AnimationPlayer:
+		return n
+	for c in n.get_children():
+		var f := _find_anim_in(c)
+		if f != null:
+			return f
+	return null
+
+## Only worth running while the player is close enough to look into it.
+const MIRROR_ACTIVE_RANGE := 7.0
+
+func _update_mirror() -> void:
+	if _mirror_vp == null or _mirror_model == null:
+		return
+	var near: bool = player.position.distance_to(mirror_pos) < MIRROR_ACTIVE_RANGE
+	_mirror_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS if near else SubViewport.UPDATE_DISABLED
+	if not near:
+		return
+	# A mirror flips only the axis along its normal, here Z. The player's own
+	# forward is (-sin y, 0, -cos y) — the camera looks down -Z — so flipping
+	# Z leaves a reflected forward of (-sin y, 0, cos y), which is the model
+	# at yaw -y. Facing the glass square on (yaw 0) therefore shows a face.
+	_mirror_model.rotation.y = -player.rotation.y
+	# step sideways and the reflection steps with you, keeping the same side
+	_mirror_model.position.x = clampf(player.position.x - mirror_pos.x, -0.9, 0.9)
+	if _mirror_anim != null and player._body_anim != null:
+		var clip: String = player._body_anim.current_animation
+		if clip != "" and _mirror_anim.has_animation(clip) and _mirror_anim.current_animation != clip:
+			_mirror_anim.play(clip)
 
 func _tex_wall(size: Vector3, pos: Vector3, m: Material) -> void:
 	MK.static_box(self, size, pos)
@@ -505,6 +637,10 @@ func _begin() -> void:
 	started = true
 	over = false
 	paused = false
+	# the body and its reflection are both built before the character is
+	# chosen, so settle them here — after a pick, or after a save has loaded
+	player.rebuild_body()
+	refresh_mirror()
 	ui.clear_overlay()
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	ui.refresh()
@@ -565,6 +701,7 @@ func _process(delta: float) -> void:
 	_update_deliveries(delta)
 	_update_particles(delta)
 	_update_pickups()
+	_update_mirror()
 	if is_night:
 		_update_spawning(delta)
 		_update_turret(delta)

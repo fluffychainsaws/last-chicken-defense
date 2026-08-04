@@ -18,7 +18,8 @@ var _vm_root: Node3D
 ## looking up/down pitches only the camera — the torso stays upright, the
 ## way a real person's body doesn't tip over when they look at their feet.
 var _body_anim: AnimationPlayer = null
-var _body_gender := "male"
+var _body_gender := ""
+var _body_model: Node3D = null
 
 ## Pump gun: two in the tube, then a forced pause before the reserve refills it.
 const SHOTGUN_MAG := 2
@@ -40,10 +41,10 @@ func setup(g: Node3D) -> void:
 	cs.position = Vector3(0, 0.95, 0)
 	add_child(cs)
 	cam = Camera3D.new()
-	# nudged slightly up and forward of dead-centre in the skull — the body
-	# mesh has no separate head to hide, so this keeps the near clip plane
-	# from showing the inside of it
-	cam.position = Vector3(0, 1.62, -0.16)
+	# Sits forward of the shoulders rather than inside the skull, far enough
+	# out that looking down reads as chest -> legs -> boots instead of down
+	# into the hole the collapsed neck leaves behind.
+	cam.position = Vector3(0, 1.58, -0.24)
 	cam.fov = 78
 	cam.near = 0.05
 	cam.far = 400
@@ -54,6 +55,14 @@ func setup(g: Node3D) -> void:
 ## Instantiates the chosen farmer model as a full sibling of the camera, so
 ## it renders in first person like a real body — feet, legs, torso, arms all
 ## visible from above, not just floating tool viewmodels.
+##
+## The neck is collapsed to nothing on this copy, taking the head, the wide
+## straw hat and (on the female) the hair down with it. All three are fused
+## into the one body mesh, and at eye height they swallow any downward
+## glance; you never see your own head anyway. Collapsing "Head" alone is
+## not enough — the female's hair is weighted below it and survives, hanging
+## right under the camera. The mirror builds its own copy from the same file
+## with the skeleton untouched, so the hat still shows there.
 func _build_body() -> void:
 	_body_gender = game.player_gender if game.player_gender in ["male", "female"] else "male"
 	var path := "res://models/farmer_male.glb" if _body_gender == "male" else "res://models/farmer_female.glb"
@@ -61,6 +70,14 @@ func _build_body() -> void:
 		return
 	var model: Node3D = load(path).instantiate()
 	add_child(model)
+	_body_model = model
+	var skel := _find_skeleton(model)
+	if skel != null:
+		var neck := skel.find_bone("neck")
+		if neck >= 0:
+			# scaled, not hidden: a bone has no visibility of its own, and the
+			# head shares one mesh and one skin with the rest of the body
+			skel.set_bone_pose_scale(neck, Vector3(0.001, 0.001, 0.001))
 	_body_anim = _find_anim_player(model)
 	if _body_anim == null:
 		return
@@ -70,8 +87,30 @@ func _build_body() -> void:
 			_body_anim.get_animation(clip_name).loop_mode = Animation.LOOP_LINEAR
 	_body_anim.play(idle)
 
+## The player is constructed in _ready(), before the start screen has even
+## been shown — so the first body is built from the default gender. Called
+## again once a game actually begins and the choice (or the save) is known.
+func rebuild_body() -> void:
+	var want: String = game.player_gender if game.player_gender in ["male", "female"] else "male"
+	if want == _body_gender and _body_model != null:
+		return
+	if _body_model != null:
+		_body_model.queue_free()
+		_body_model = null
+		_body_anim = null
+	_build_body()
+
 func _idle_clip() -> String:
 	return "Idle_02" if _body_gender == "male" else "Idle_15"
+
+static func _find_skeleton(n: Node) -> Skeleton3D:
+	if n is Skeleton3D:
+		return n
+	for c in n.get_children():
+		var f := _find_skeleton(c)
+		if f != null:
+			return f
+	return null
 
 static func _find_anim_player(n: Node) -> AnimationPlayer:
 	if n is AnimationPlayer:

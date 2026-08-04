@@ -676,6 +676,9 @@ func _character_card(label_text: String, model_path: String, idle_anim: String, 
 	vp.size = Vector2i(300, 380)
 	vp.transparent_bg = true
 	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	# a preview viewport shares the main World3D unless told otherwise, which
+	# would drop both preview farmers into the middle of the yard
+	vp.own_world_3d = true
 	vp_container.add_child(vp)
 
 	var cam := Camera3D.new()
