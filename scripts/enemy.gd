@@ -12,6 +12,22 @@ const GOBLIN_MODEL_FOOT_OFFSET := 0.0
 ## Yaw correction so the model's face points along +Z like the procedural enemies.
 const GOBLIN_MODEL_YAW := 0.0
 
+## Bone indices in the authored rig (UniRig auto-rig; names are generic, but the
+## hierarchy and index order are stable across every instance from this file).
+## Found by rendering candidate rotations and checking the result — the rig
+## carries no semantic bone names to go on. Every hinge here swings on local Z.
+const GOBLIN_BONE_R_SHOULDER := 9
+const GOBLIN_BONE_L_SHOULDER := 26
+const GOBLIN_BONE_R_ELBOW := 10
+const GOBLIN_BONE_L_ELBOW := 27
+const GOBLIN_BONE_R_WRIST := 13
+const GOBLIN_BONE_L_WRIST := 30
+const GOBLIN_BONE_R_HIP := 43
+const GOBLIN_BONE_L_HIP := 48
+## Degrees: swings both arms from hanging at the sides to raised overhead.
+const GOBLIN_ARM_UP_SHOULDER_DEG := -70.0
+const GOBLIN_ARM_UP_ELBOW_DEG := 25.0
+
 const THEMES := [
 	{"id": "zombie", "name": "THE SHUFFLING DEAD", "sub": "they smell the eggs", "body": Color(0.35, 0.49, 0.29), "eye": Color(1, 0.15, 0.15), "scale": 1.0, "speed": 2.2, "hp": 50.0, "dmg": 8.0, "bounty": 4, "base": 5.0, "per": 1.6},
 	{"id": "goblin", "name": "THE GOBLIN GRAB-GANG", "sub": "quick little hands", "body": Color(0.29, 0.6, 0.25), "eye": Color(1, 0.9, 0.2), "scale": 0.75, "speed": 3.6, "hp": 30.0, "dmg": 5.0, "bounty": 3, "base": 6.0, "per": 2.0},
@@ -62,6 +78,9 @@ var _arms: Array = []
 var _arm_rest: Array = []
 var _stride := 0.0
 var _mats: Array = []
+## Set only for the rigged goblin model; every other theme is procedural and
+## animates through the _legs/_knees/_arms Node3D pivots instead.
+var _skel: Skeleton3D = null
 
 func setup(g: Node3D, night: int, thm: Dictionary, escort := false) -> void:
 	game = g
@@ -145,34 +164,10 @@ func _build_goblin() -> void:
 	var s: float = body_scale
 	# bigger goblins lumber, runts scurry
 	spd *= lerpf(1.15, 0.82, clampf((s / theme["scale"] - 0.85) / 0.45, 0.0, 1.0))
-	# the authored mesh is ~335k verts; a browser can't carry a wave of them
 	if ResourceLoader.exists(GOBLIN_MODEL_PATH) and not OS.has_feature("web"):
 		_build_goblin_model(s)
 		return
 	_build_goblin_procedural(s)
-
-## Pull the rigged mesh's rest-pose geometry out once with SurfaceTool and
-## share the result across every goblin — there is no baked animation to
-## drive the skeleton, so the bind pose is the pose.
-static var _goblin_mesh_cache: Mesh = null
-static var _goblin_xform_cache := Transform3D.IDENTITY
-static var _goblin_prepared := false
-
-static func goblin_mesh() -> Mesh:
-	if _goblin_prepared:
-		return _goblin_mesh_cache
-	_goblin_prepared = true
-	if not ResourceLoader.exists(GOBLIN_MODEL_PATH):
-		return null
-	var root: Node3D = load(GOBLIN_MODEL_PATH).instantiate()
-	var src: MeshInstance3D = _first_mesh(root)
-	if src != null:
-		_goblin_xform_cache = src.transform
-		var st := SurfaceTool.new()
-		st.create_from(src.mesh, 0)
-		_goblin_mesh_cache = st.commit()
-	root.free()
-	return _goblin_mesh_cache
 
 static func _first_mesh(n: Node) -> MeshInstance3D:
 	if n is MeshInstance3D:
@@ -183,16 +178,28 @@ static func _first_mesh(n: Node) -> MeshInstance3D:
 			return found
 	return null
 
-## Authored goblin: scaled to gameplay height, dropped so the feet meet the ground,
-## with a per-instance material so the damage flash only tints the one that got hit.
+static func _first_skeleton(n: Node) -> Skeleton3D:
+	if n is Skeleton3D:
+		return n
+	for c in n.get_children():
+		var found := _first_skeleton(c)
+		if found != null:
+			return found
+	return null
+
+## Authored goblin: a real rig, instantiated whole rather than baked into a
+## shared static mesh, since a posed skeleton can't be shared across
+## instances the way rest-pose geometry could. The mesh is light (~14k verts)
+## precisely so that trade is affordable across a full wave.
 func _build_goblin_model(s: float) -> void:
-	var mesh := goblin_mesh()
-	if mesh == null:
+	var inst: Node3D = load(GOBLIN_MODEL_PATH).instantiate()
+	var mesh_inst := _first_mesh(inst)
+	var skel := _first_skeleton(inst)
+	if mesh_inst == null or skel == null:
+		inst.free()
 		_build_goblin_procedural(s)
 		return
-	var inst := MeshInstance3D.new()
-	inst.mesh = mesh
-	inst.transform = _goblin_xform_cache
+	_skel = skel
 	var holder := Node3D.new()
 	holder.add_child(inst)
 	# theme scale 0.75 should read as a ~1.5 m goblin
@@ -202,16 +209,14 @@ func _build_goblin_model(s: float) -> void:
 	holder.position.y = GOBLIN_MODEL_FOOT_OFFSET * ms
 	holder.rotation.y = deg_to_rad(GOBLIN_MODEL_YAW)
 	add_child(holder)
-	# The source .glb ships with no material, so skin it here.
-	var skins := [
-		Color(0.42, 0.60, 0.24), Color(0.34, 0.52, 0.22), Color(0.52, 0.66, 0.30),
-		Color(0.26, 0.47, 0.29), Color(0.28, 0.55, 0.55),
-	]
-	var skin: Color = skins[randi() % skins.size()]
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = skin
-	mat.roughness = 0.8
-	inst.set_surface_override_material(0, mat)
+	# Real baseColor/normal/emissive textures ship on the mesh now; duplicate
+	# the imported material per instance (so the damage flash only lights up
+	# the one that got hit) and tint it lightly so a wave isn't visibly clones.
+	var base_mat := mesh_inst.mesh.surface_get_material(0)
+	var mat: BaseMaterial3D = base_mat.duplicate() if base_mat != null else StandardMaterial3D.new()
+	var tint := Color(randf_range(0.82, 1.05), randf_range(0.82, 1.05), randf_range(0.82, 1.05))
+	mat.albedo_color = mat.albedo_color * tint
+	mesh_inst.set_surface_override_material(0, mat)
 	_mats.append(mat)
 
 func _mesh_children(n: Node) -> Array:
@@ -1582,7 +1587,13 @@ func tick(delta: float) -> void:
 			var out := Vector3(position.x, 0, position.z).normalized()
 			_move(out, spd * 1.15, delta)
 			if carried != null and is_instance_valid(carried):
-				carried.position = position + Vector3(0, 2.2 * body_scale, 0)
+				if _skel != null:
+					# cradled between the raised hands, rather than floating above the head
+					var rw: Vector3 = _skel.get_bone_global_pose(GOBLIN_BONE_R_WRIST).origin
+					var lw: Vector3 = _skel.get_bone_global_pose(GOBLIN_BONE_L_WRIST).origin
+					carried.position = _skel.global_transform * ((rw + lw) * 0.5) + Vector3(0, 0.12, 0)
+				else:
+					carried.position = position + Vector3(0, 2.2 * body_scale, 0)
 			if Vector3(position.x, 0, position.z).length() > 70.0:
 				game.chicken_taken(carried)
 				carried = null
@@ -1621,6 +1632,11 @@ func tick(delta: float) -> void:
 			carried.state = "carried"
 			carried.visible = true
 			state = "carry"
+			if _skel != null:
+				_skel.set_bone_pose_rotation(GOBLIN_BONE_R_SHOULDER, Quaternion(Vector3(0, 0, 1), deg_to_rad(GOBLIN_ARM_UP_SHOULDER_DEG)))
+				_skel.set_bone_pose_rotation(GOBLIN_BONE_L_SHOULDER, Quaternion(Vector3(0, 0, 1), deg_to_rad(GOBLIN_ARM_UP_SHOULDER_DEG)))
+				_skel.set_bone_pose_rotation(GOBLIN_BONE_R_ELBOW, Quaternion(Vector3(0, 0, 1), deg_to_rad(GOBLIN_ARM_UP_ELBOW_DEG)))
+				_skel.set_bone_pose_rotation(GOBLIN_BONE_L_ELBOW, Quaternion(Vector3(0, 0, 1), deg_to_rad(GOBLIN_ARM_UP_ELBOW_DEG)))
 			game.sfx.play("grab")
 			game.ui.whisper("IT HAS ONE OF YOUR CHICKENS")
 			return
@@ -1659,7 +1675,12 @@ func _move(dir: Vector3, speed: float, delta: float) -> void:
 ## root of its length, so a bigger body takes slower, longer strides while a
 ## small one scurries. That single term is most of why the sizes feel different.
 func _walk(speed: float, delta: float) -> void:
-	if flying or _legs.is_empty():
+	if flying:
+		return
+	if _skel != null:
+		_walk_skel(speed, delta)
+		return
+	if _legs.is_empty():
 		return
 	_stride += delta * speed * 3.4 / sqrt(maxf(body_scale, 0.3))
 	var swing := sin(_stride)
@@ -1681,6 +1702,14 @@ func _walk(speed: float, delta: float) -> void:
 	# a limp rather than a walk.
 	position.y = (1.0 - cos(_stride * 2.0)) * 0.022 * body_scale
 	rotation.z = swing * 0.03
+
+## Same cadence math as _walk(), driving the rigged goblin's hip bones
+## instead of Node3D leg pivots. Both hinge on local Z (found by testing).
+func _walk_skel(speed: float, delta: float) -> void:
+	_stride += delta * speed * 3.4 / sqrt(maxf(body_scale, 0.3))
+	var swing_deg := sin(_stride) * 28.0
+	_skel.set_bone_pose_rotation(GOBLIN_BONE_R_HIP, Quaternion(Vector3(0, 0, 1), deg_to_rad(swing_deg)))
+	_skel.set_bone_pose_rotation(GOBLIN_BONE_L_HIP, Quaternion(Vector3(0, 0, 1), deg_to_rad(-swing_deg)))
 
 func ignite() -> void:
 	if state == "burn":
