@@ -18,15 +18,13 @@ const GOBLIN_MODEL_YAW := 0.0
 ## carries no semantic bone names to go on. Every hinge here swings on local Z.
 const GOBLIN_BONE_R_SHOULDER := 9
 const GOBLIN_BONE_L_SHOULDER := 26
-const GOBLIN_BONE_R_ELBOW := 10
-const GOBLIN_BONE_L_ELBOW := 27
 const GOBLIN_BONE_R_WRIST := 13
 const GOBLIN_BONE_L_WRIST := 30
 const GOBLIN_BONE_R_HIP := 43
 const GOBLIN_BONE_L_HIP := 48
 ## Degrees: swings both arms from hanging at the sides to raised overhead.
-const GOBLIN_ARM_UP_SHOULDER_DEG := -70.0
-const GOBLIN_ARM_UP_ELBOW_DEG := 25.0
+## Applied about the shoulder's local X, composed onto its rest rotation.
+const GOBLIN_ARM_UP_SHOULDER_DEG := 120.0
 
 const THEMES := [
 	{"id": "zombie", "name": "THE SHUFFLING DEAD", "sub": "they smell the eggs", "body": Color(0.35, 0.49, 0.29), "eye": Color(1, 0.15, 0.15), "scale": 1.0, "speed": 2.2, "hp": 50.0, "dmg": 8.0, "bounty": 4, "base": 5.0, "per": 1.6},
@@ -1633,10 +1631,11 @@ func tick(delta: float) -> void:
 			carried.visible = true
 			state = "carry"
 			if _skel != null:
-				_skel.set_bone_pose_rotation(GOBLIN_BONE_R_SHOULDER, Quaternion(Vector3(0, 0, 1), deg_to_rad(GOBLIN_ARM_UP_SHOULDER_DEG)))
-				_skel.set_bone_pose_rotation(GOBLIN_BONE_L_SHOULDER, Quaternion(Vector3(0, 0, 1), deg_to_rad(GOBLIN_ARM_UP_SHOULDER_DEG)))
-				_skel.set_bone_pose_rotation(GOBLIN_BONE_R_ELBOW, Quaternion(Vector3(0, 0, 1), deg_to_rad(GOBLIN_ARM_UP_ELBOW_DEG)))
-				_skel.set_bone_pose_rotation(GOBLIN_BONE_L_ELBOW, Quaternion(Vector3(0, 0, 1), deg_to_rad(GOBLIN_ARM_UP_ELBOW_DEG)))
+				# composed onto the rest rotation, like the walk — a bare
+				# axis-angle here would throw the shoulders' bind pose away
+				var lift := Quaternion(Vector3(1, 0, 0), deg_to_rad(GOBLIN_ARM_UP_SHOULDER_DEG))
+				_skel.set_bone_pose_rotation(GOBLIN_BONE_R_SHOULDER, _rest_rot(GOBLIN_BONE_R_SHOULDER) * lift)
+				_skel.set_bone_pose_rotation(GOBLIN_BONE_L_SHOULDER, _rest_rot(GOBLIN_BONE_L_SHOULDER) * lift)
 			game.sfx.play("grab")
 			game.ui.whisper("IT HAS ONE OF YOUR CHICKENS")
 			return
@@ -1704,12 +1703,21 @@ func _walk(speed: float, delta: float) -> void:
 	rotation.z = swing * 0.03
 
 ## Same cadence math as _walk(), driving the rigged goblin's hip bones
-## instead of Node3D leg pivots. Both hinge on local Z (found by testing).
+## instead of Node3D leg pivots. Both hinge on local Z.
+##
+## The swing is composed ONTO each hip's rest rotation rather than replacing
+## it. set_bone_pose_rotation() sets the bone's rotation outright, so passing
+## a bare axis-angle throws away the bind pose — and these two hips sit at
+## quite different rest orientations, so that collapsed both legs into the
+## torso rather than swinging them.
 func _walk_skel(speed: float, delta: float) -> void:
 	_stride += delta * speed * 3.4 / sqrt(maxf(body_scale, 0.3))
-	var swing_deg := sin(_stride) * 28.0
-	_skel.set_bone_pose_rotation(GOBLIN_BONE_R_HIP, Quaternion(Vector3(0, 0, 1), deg_to_rad(swing_deg)))
-	_skel.set_bone_pose_rotation(GOBLIN_BONE_L_HIP, Quaternion(Vector3(0, 0, 1), deg_to_rad(-swing_deg)))
+	var swing := sin(_stride) * deg_to_rad(28.0)
+	_skel.set_bone_pose_rotation(GOBLIN_BONE_R_HIP, _rest_rot(GOBLIN_BONE_R_HIP) * Quaternion(Vector3(0, 0, 1), swing))
+	_skel.set_bone_pose_rotation(GOBLIN_BONE_L_HIP, _rest_rot(GOBLIN_BONE_L_HIP) * Quaternion(Vector3(0, 0, 1), -swing))
+
+func _rest_rot(bone: int) -> Quaternion:
+	return _skel.get_bone_rest(bone).basis.get_rotation_quaternion()
 
 func ignite() -> void:
 	if state == "burn":
