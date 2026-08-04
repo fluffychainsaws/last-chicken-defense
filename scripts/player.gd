@@ -69,6 +69,12 @@ func _build_body() -> void:
 	if not ResourceLoader.exists(path):
 		return
 	var model: Node3D = load(path).instantiate()
+	# The source .glb's front (face, straps) faces +Z. This game's forward —
+	# both movement and the camera's default look direction — is -Z, so an
+	# unrotated body faces exactly backward: looking down showed your own
+	# back and the walk cycle's "forward" leg swing pushed toward +Z, against
+	# the direction you actually walk.
+	model.rotation.y = PI
 	add_child(model)
 	_body_model = model
 	var skel := _find_skeleton(model)
