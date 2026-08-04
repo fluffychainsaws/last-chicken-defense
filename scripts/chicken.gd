@@ -356,7 +356,10 @@ func _fire_at(enemy, _delta: float) -> void:
 		game.hen_shot(self, enemy, dmg, stats)
 	else:
 		enemy.damage(dmg)
-		game.sfx.cluck(-8.0)
+		if class_id == "knight":
+			game.sfx.play("sword", -6.0)
+		else:
+			game.sfx.cluck(-8.0)
 
 ## Called when a delivery lands. The hen drops what she is doing and goes.
 func await_package(pos: Vector3) -> void:

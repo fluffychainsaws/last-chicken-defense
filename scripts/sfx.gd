@@ -10,6 +10,7 @@ var _crow_player: AudioStreamPlayer
 const CLUCK_PATH := "res://audio/chicken_cluck.mp3"
 const CROW_PATH := "res://audio/rooster_crow.mp3"
 const SHOTGUN_PATH := "res://audio/shotgun.mp3"
+const SWORD_PATH := "res://audio/sword.mp3"
 ## Minimum gap between chicken vocalizations, so the yard never turns into a wall of clucking.
 const CLUCK_MIN_GAP := 3.2
 
@@ -85,6 +86,9 @@ func _ready() -> void:
 	var gun_stream := _load_mp3(SHOTGUN_PATH)
 	if gun_stream != null:
 		_streams["shot"] = gun_stream
+	var sword_stream := _load_mp3(SWORD_PATH)
+	if sword_stream != null:
+		_streams["sword"] = sword_stream
 	for i in 10:
 		var p := AudioStreamPlayer.new()
 		add_child(p)
