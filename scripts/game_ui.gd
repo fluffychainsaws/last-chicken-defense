@@ -626,8 +626,107 @@ func show_start(has_save: bool) -> void:
 		box.add_child(cont)
 	var new_btn := Button.new()
 	new_btn.text = "NEW GAME"
-	new_btn.pressed.connect(func(): game.start_new())
+	new_btn.pressed.connect(func(): show_character_select())
 	box.add_child(new_btn)
+
+## Shown once, before a new game — a continued save keeps whatever it already chose.
+func show_character_select() -> void:
+	clear_overlay()
+	var bg := ColorRect.new()
+	bg.color = Color(0.02, 0.02, 0.03, 0.92)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_overlay.add_child(bg)
+
+	var outer := VBoxContainer.new()
+	outer.anchor_left = 0.5
+	outer.anchor_right = 0.5
+	outer.anchor_top = 0.5
+	outer.anchor_bottom = 0.5
+	outer.offset_left = -420
+	outer.offset_right = 420
+	outer.offset_top = -320
+	outer.offset_bottom = 320
+	outer.alignment = BoxContainer.ALIGNMENT_CENTER
+	outer.add_theme_constant_override("separation", 16)
+	_overlay.add_child(outer)
+
+	var title := _label(outer, "CHOOSE YOUR FARMER", 34, Color(1, 0.85, 0.3))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 30)
+	outer.add_child(row)
+	row.add_child(_character_card("MALE", "res://models/farmer_male.glb", "Idle_02", "male"))
+	row.add_child(_character_card("FEMALE", "res://models/farmer_female.glb", "Idle_15", "female"))
+
+## One preview card: a live 3D viewport looping the model's idle animation,
+## plus the button that locks it in and starts the game.
+func _character_card(label_text: String, model_path: String, idle_anim: String, gender: String) -> VBoxContainer:
+	var card := VBoxContainer.new()
+	card.alignment = BoxContainer.ALIGNMENT_CENTER
+	card.add_theme_constant_override("separation", 8)
+
+	var vp_container := SubViewportContainer.new()
+	vp_container.custom_minimum_size = Vector2(300, 380)
+	vp_container.stretch = true
+	card.add_child(vp_container)
+
+	var vp := SubViewport.new()
+	vp.size = Vector2i(300, 380)
+	vp.transparent_bg = true
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	vp_container.add_child(vp)
+
+	var cam := Camera3D.new()
+	vp.add_child(cam)
+	# look_at_from_position sets position+orientation in one call, so it
+	# doesn't depend on the camera already being a frame deep in the tree
+	cam.look_at_from_position(Vector3(0, 1.05, 2.4), Vector3(0, 1.0, 0), Vector3.UP)
+
+	var light := DirectionalLight3D.new()
+	light.rotation_degrees = Vector3(-50, -25, 0)
+	light.light_energy = 1.3
+	vp.add_child(light)
+	var fill := DirectionalLight3D.new()
+	fill.rotation_degrees = Vector3(-20, 140, 0)
+	fill.light_energy = 0.5
+	vp.add_child(fill)
+	var env_node := WorldEnvironment.new()
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.1, 0.11, 0.13)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.55, 0.55, 0.6)
+	env.ambient_light_energy = 0.9
+	env_node.environment = env
+	vp.add_child(env_node)
+
+	var model: Node3D = load(model_path).instantiate()
+	vp.add_child(model)
+	var anim := _find_anim_player(model)
+	if anim != null and anim.has_animation(idle_anim):
+		# the source clip isn't marked looping on import; the preview needs it to be
+		anim.get_animation(idle_anim).loop_mode = Animation.LOOP_LINEAR
+		anim.play(idle_anim)
+
+	_label(card, label_text, 22, UI_INK).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var btn := Button.new()
+	btn.text = "SELECT"
+	btn.pressed.connect(func():
+		game.player_gender = gender
+		game.start_new())
+	card.add_child(btn)
+	return card
+
+static func _find_anim_player(n: Node) -> AnimationPlayer:
+	if n is AnimationPlayer:
+		return n
+	for c in n.get_children():
+		var f := _find_anim_player(c)
+		if f != null:
+			return f
+	return null
 
 func show_pause() -> void:
 	var box := _overlay_panel()

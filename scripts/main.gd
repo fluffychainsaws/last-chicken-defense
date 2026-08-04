@@ -80,6 +80,9 @@ var eggs := 0
 var feed := 5
 var shells := 0
 var day_num := 1
+## Chosen on the character-select screen before the first "NEW GAME"; carried
+## into the save so a continued game keeps the same body.
+var player_gender := "male"
 var is_night := false
 var phase_t := 0.0
 var upgrades := {"fence": 0, "coop": 0, "helmets": false, "turret": false, "rooster": false, "shotgun": false, "shoes": false}
@@ -1533,7 +1536,7 @@ func _save_game() -> void:
 	var data := {
 		"coins": coins, "day": day_num, "eggs": eggs, "feed": feed, "shells": shells,
 		"hens": hens, "roosters": roosters.size(), "coop_hp": coop_hp, "upgrades": upgrades,
-	"flock": flock, "crew": crew,
+		"flock": flock, "crew": crew, "gender": player_gender,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	f.store_string(JSON.stringify(data))
@@ -1553,6 +1556,7 @@ func _load_game() -> void:
 	feed = int(data.get("feed", 5))
 	shells = int(data.get("shells", 0))
 	coop_hp = float(data.get("coop_hp", 300.0))
+	player_gender = str(data.get("gender", "male"))
 	var loaded_upgrades = data.get("upgrades", {})
 	for k in upgrades:
 		if loaded_upgrades.has(k):

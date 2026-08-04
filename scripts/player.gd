@@ -14,6 +14,12 @@ var _fire_cd := 0.0
 var _vm: Array = []
 var _vm_root: Node3D
 
+## The chosen farmer body. A sibling of the camera, not a child of it, so
+## looking up/down pitches only the camera — the torso stays upright, the
+## way a real person's body doesn't tip over when they look at their feet.
+var _body_anim: AnimationPlayer = null
+var _body_gender := "male"
+
 ## Pump gun: two in the tube, then a forced pause before the reserve refills it.
 const SHOTGUN_MAG := 2
 const SHOTGUN_RELOAD_TIME := 1.6
@@ -34,12 +40,47 @@ func setup(g: Node3D) -> void:
 	cs.position = Vector3(0, 0.95, 0)
 	add_child(cs)
 	cam = Camera3D.new()
-	cam.position = Vector3(0, 1.55, 0)
+	# nudged slightly up and forward of dead-centre in the skull — the body
+	# mesh has no separate head to hide, so this keeps the near clip plane
+	# from showing the inside of it
+	cam.position = Vector3(0, 1.62, -0.16)
 	cam.fov = 78
 	cam.near = 0.05
 	cam.far = 400
 	add_child(cam)
 	_build_viewmodels()
+	_build_body()
+
+## Instantiates the chosen farmer model as a full sibling of the camera, so
+## it renders in first person like a real body — feet, legs, torso, arms all
+## visible from above, not just floating tool viewmodels.
+func _build_body() -> void:
+	_body_gender = game.player_gender if game.player_gender in ["male", "female"] else "male"
+	var path := "res://models/farmer_male.glb" if _body_gender == "male" else "res://models/farmer_female.glb"
+	if not ResourceLoader.exists(path):
+		return
+	var model: Node3D = load(path).instantiate()
+	add_child(model)
+	_body_anim = _find_anim_player(model)
+	if _body_anim == null:
+		return
+	var idle := _idle_clip()
+	for clip_name in [idle, "Walking", "Running"]:
+		if _body_anim.has_animation(clip_name):
+			_body_anim.get_animation(clip_name).loop_mode = Animation.LOOP_LINEAR
+	_body_anim.play(idle)
+
+func _idle_clip() -> String:
+	return "Idle_02" if _body_gender == "male" else "Idle_15"
+
+static func _find_anim_player(n: Node) -> AnimationPlayer:
+	if n is AnimationPlayer:
+		return n
+	for c in n.get_children():
+		var f := _find_anim_player(c)
+		if f != null:
+			return f
+	return null
 
 func _build_viewmodels() -> void:
 	_vm_root = Node3D.new()
@@ -135,7 +176,25 @@ func _physics_process(delta: float) -> void:
 	# keep inside the world
 	position.x = clampf(position.x, -90.0, 90.0)
 	position.z = clampf(position.z, -90.0, 90.0)
+	_update_body_anim(dir.length() > 0.01, speed)
 	_interact_scan()
+
+## Idle/Walking/Running, matched to actual movement input rather than a
+## separate state machine — there's no other reason for the body to move.
+func _update_body_anim(moving: bool, cur_speed: float) -> void:
+	if _body_anim == null:
+		return
+	var idle := _idle_clip()
+	var target := idle
+	if moving:
+		target = "Running" if Input.is_action_pressed("sprint") else "Walking"
+	if not _body_anim.has_animation(target):
+		target = idle
+	if _body_anim.current_animation != target:
+		_body_anim.play(target)
+	# the clips carry their own pace; nudge it to roughly track shoes/sprint
+	# instead of the legs sliding out of sync with the actual speed
+	_body_anim.speed_scale = clampf(cur_speed / 6.0, 0.6, 1.8) if target != idle else 1.0
 
 func _interact_scan() -> void:
 	var prompt = null
