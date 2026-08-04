@@ -664,10 +664,17 @@ func is_day() -> bool:
 
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
+		# The Roost and the Farmers Market are opened from separate, mutually
+		# exclusive interact contexts, so only one is ever open at a time —
+		# closing whichever it is takes ESC out of it. This used to only
+		# check market_open, so ESC did nothing to close the Roost: paused
+		# flipped back to false and the mouse recaptured, but the panel
+		# itself was never hidden, leaving the game stuck showing it with no
+		# way to click out.
 		if market_open:
 			close_market()
-			if coop_open:
-				close_coop()
+		elif coop_open:
+			close_coop()
 		elif started and not over:
 			if paused:
 				unpause()

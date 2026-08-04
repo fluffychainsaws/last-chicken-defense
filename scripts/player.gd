@@ -256,7 +256,10 @@ func _interact_scan() -> void:
 	elif game.is_day() and position.distance_to(game.coop_pos) < 4.5 and game.coop_hp < game.max_coop_hp():
 		ctx = "repair"
 		prompt = "[HOLD E]  REPAIR COOP  (%d%%)" % int(100.0 * game.coop_hp / game.max_coop_hp())
-	elif game.is_day() and position.distance_to(game.kiosk_pos) < 3.2:
+	elif game.is_day() and position.distance_to(game.kiosk_pos) < 1.6:
+		# the kiosk's own counter is only ~1.9m wide and 0.7m deep; this used
+		# to trigger from 3.2m away, well outside the stand itself, so just
+		# walking past it opened the Roost
 		ctx = "roost"
 		prompt = "[E]  THE ROOST  (train the flock)"
 	else:
