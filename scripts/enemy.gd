@@ -82,6 +82,9 @@ var _knees: Array = []
 var _arms: Array = []
 var _arm_rest: Array = []
 var _stride := 0.0
+## Counts 1 -> 0 across a single swipe. Drives the arms whether the body is a
+## rig or a pile of Node3D pivots, so every theme gets the same gesture.
+var _swipe_t := 0.0
 var _mats: Array = []
 ## Set only for the rigged goblin model; every other theme is procedural and
 ## animates through the _legs/_knees/_arms Node3D pivots instead.
@@ -1626,10 +1629,14 @@ func tick(delta: float) -> void:
 		game.damage_player(theme["dmg"])
 	if attacking_coop:
 		if dist < 2.6:
+			# face what it is tearing at, rather than whatever way it arrived
+			if flat_d.length() > 0.01:
+				rotation.y = atan2(flat_d.x, flat_d.z)
 			if _atk_cd <= 0.0:
 				_atk_cd = 1.0
+				_swipe_t = 1.0
 				game.damage_coop(theme["dmg"] * 0.6)
-				position += Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)) * 0.05
+			_swipe(delta)
 			return
 	else:
 		if dist < 1.2 * maxf(1.0, body_scale) and (not flying or position.y < 1.5):
@@ -1736,6 +1743,32 @@ func _walk_skel(speed: float, delta: float) -> void:
 	# rises on each footfall (twice per cycle) and rolls onto the planted leg
 	position.y = (1.0 - cos(_stride * 2.0)) * 0.022 * body_scale
 	rotation.z = swing * 0.03
+
+## One raise-and-tear, out and back on a sine so it eases at both ends
+## instead of snapping. Also leans the body into the blow and shoves it a
+## little off the spot, so the whole creature commits to the swing rather
+## than waving an arm at the wall.
+const SWIPE_SPEED := 2.6
+
+func _swipe(delta: float) -> void:
+	_swipe_t = maxf(0.0, _swipe_t - delta * SWIPE_SPEED)
+	# 0 at rest, 1 at full extension, 0 again as the arms drop back
+	var reach := sin((1.0 - _swipe_t) * PI)
+	if _skel != null:
+		# negative throws the arms forward past the head, claws leading;
+		# positive winds them up behind instead, which reads as a shrug
+		var q := Quaternion(Vector3(1, 0, 0), reach * deg_to_rad(-110.0))
+		_skel.set_bone_pose_rotation(GOBLIN_BONE_R_SHOULDER, q * _rest_rot(GOBLIN_BONE_R_SHOULDER))
+		_skel.set_bone_pose_rotation(GOBLIN_BONE_L_SHOULDER, q * _rest_rot(GOBLIN_BONE_L_SHOULDER))
+	else:
+		# these shoulders hang forward from a negative rest pitch, so driving
+		# rotation.x further negative is what reaches out rather than back
+		for i in _arms.size():
+			_arms[i].rotation.x = _arm_rest[i] - reach * deg_to_rad(70.0)
+	# rise onto the blow, and drop the walk's roll so it is not leaning
+	# sideways while it hammers
+	rotation.z = 0.0
+	position.y = reach * 0.05 * body_scale
 
 func _rest_rot(bone: int) -> Quaternion:
 	return _skel.get_bone_rest(bone).basis.get_rotation_quaternion()
