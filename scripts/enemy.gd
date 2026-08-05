@@ -208,6 +208,7 @@ func _build_goblin_model(s: float) -> void:
 		_build_goblin_procedural(s)
 		return
 	_skel = skel
+	mesh_inst.mesh = _declawed_goblin_mesh(mesh_inst.mesh)
 	var holder := Node3D.new()
 	holder.add_child(inst)
 	# theme scale 0.75 should read as a ~1.5 m goblin
@@ -226,6 +227,127 @@ func _build_goblin_model(s: float) -> void:
 	mat.albedo_color = mat.albedo_color * tint
 	mesh_inst.set_surface_override_material(0, mat)
 	_mats.append(mat)
+
+## The auto-rigger blended skin weights between the goblin's hands and its
+## feet — they overlap in the bind pose, since it stands hunched with its
+## claws down by its toes. About 650 vertices ended up pulled roughly half
+## by an arm bone and half by a leg bone, so raising an arm dragged the toes
+## with it and stretched the geometry between them.
+##
+## Averaging two limbs that move in opposite directions is the whole problem,
+## so this hands each contested vertex wholly to whichever limb already had
+## the larger share and renormalises what remains. A vertex assigned to the
+## "wrong" limb just travels with it; nothing stretches either way. Bones
+## outside the two limb groups (spine, head, the pelvis) are left alone.
+##
+## Fixed once and shared: the weights are identical for every goblin, and
+## only the Skeleton3D driving them is per-instance.
+const GOBLIN_ARM_BONE_LO := 9
+const GOBLIN_ARM_BONE_HI := 42
+const GOBLIN_LEG_BONE_LO := 43
+const GOBLIN_LEG_BONE_HI := 52
+
+static var _declawed_cache: ArrayMesh = null
+
+## True when a face has one corner owned by an arm and another by a leg.
+static func _spans_limbs(a: int, b: int, c: int, bones: PackedInt32Array, weights: PackedFloat32Array, per: int) -> bool:
+	var saw_arm := false
+	var saw_leg := false
+	for v in [a, b, c]:
+		var base: int = int(v) * per
+		var arm := 0.0
+		var leg := 0.0
+		for k in per:
+			var w := weights[base + k]
+			if w <= 0.0:
+				continue
+			var bi := bones[base + k]
+			if bi >= GOBLIN_ARM_BONE_LO and bi <= GOBLIN_ARM_BONE_HI:
+				arm += w
+			elif bi >= GOBLIN_LEG_BONE_LO and bi <= GOBLIN_LEG_BONE_HI:
+				leg += w
+		if arm <= 0.02 and leg <= 0.02:
+			continue
+		if arm >= leg:
+			saw_arm = true
+		else:
+			saw_leg = true
+	return saw_arm and saw_leg
+
+static func _declawed_goblin_mesh(src: Mesh) -> Mesh:
+	if _declawed_cache != null:
+		return _declawed_cache
+	if src == null or src.get_surface_count() == 0:
+		return src
+	var arrays: Array = src.surface_get_arrays(0)
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var bones: PackedInt32Array = arrays[Mesh.ARRAY_BONES]
+	var weights: PackedFloat32Array = arrays[Mesh.ARRAY_WEIGHTS]
+	if verts.size() == 0 or bones.size() == 0:
+		return src
+	var per := bones.size() / verts.size()
+	var fixed := 0
+	for v in verts.size():
+		var base := v * per
+		var arm := 0.0
+		var leg := 0.0
+		for k in per:
+			var w := weights[base + k]
+			if w <= 0.0:
+				continue
+			var bi := bones[base + k]
+			if bi >= GOBLIN_ARM_BONE_LO and bi <= GOBLIN_ARM_BONE_HI:
+				arm += w
+			elif bi >= GOBLIN_LEG_BONE_LO and bi <= GOBLIN_LEG_BONE_HI:
+				leg += w
+		if arm <= 0.02 or leg <= 0.02:
+			continue
+		var keep_arm := arm >= leg
+		var total := 0.0
+		for k in per:
+			var bi := bones[base + k]
+			var is_arm: bool = bi >= GOBLIN_ARM_BONE_LO and bi <= GOBLIN_ARM_BONE_HI
+			var is_leg: bool = bi >= GOBLIN_LEG_BONE_LO and bi <= GOBLIN_LEG_BONE_HI
+			if (keep_arm and is_leg) or (not keep_arm and is_arm):
+				weights[base + k] = 0.0
+			total += weights[base + k]
+		if total > 0.0:
+			for k in per:
+				weights[base + k] /= total
+		fixed += 1
+	# Reweighting alone is not enough: 166 triangles are welded straight from
+	# a hand vertex to a foot vertex, so whatever the weights say, those faces
+	# span two limbs and tear when the arms move. Drop them. It severs the
+	# hand from the foot at the cost of ~0.9% of the faces, in the crevice
+	# where the claws sit against the toes.
+	var tri: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var kept := PackedInt32Array()
+	var cut := 0
+	for t in range(tri.size() / 3):
+		var a := tri[t * 3]
+		var b2 := tri[t * 3 + 1]
+		var c := tri[t * 3 + 2]
+		if _spans_limbs(a, b2, c, bones, weights, per):
+			cut += 1
+			continue
+		kept.append(a)
+		kept.append(b2)
+		kept.append(c)
+	arrays[Mesh.ARRAY_INDEX] = kept
+	arrays[Mesh.ARRAY_WEIGHTS] = weights
+	print("goblin skin: unpicked %d vertices, cut %d hand/foot bridge faces" % [fixed, cut])
+	var out := ArrayMesh.new()
+	# the 8-influence flag has to be carried over or the skin is reinterpreted
+	# as 4 per vertex and every weight lands on the wrong bone
+	var flags := 0
+	if per == 8:
+		flags = Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS
+	out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, flags)
+	# a rebuilt surface carries no material; without this the textures are
+	# dropped and every goblin renders untextured white
+	out.surface_set_material(0, src.surface_get_material(0))
+	_declawed_cache = out
+	return out
 
 func _mesh_children(n: Node) -> Array:
 	var acc := []
