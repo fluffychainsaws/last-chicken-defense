@@ -95,6 +95,10 @@ var _stride := 0.0
 ## Counts 1 -> 0 across a single swipe. Drives the arms whether the body is a
 ## rig or a pile of Node3D pivots, so every theme gets the same gesture.
 var _swipe_t := 0.0
+## Counts down while the player is being chased; _chase_cd is the stretch
+## afterwards where this one has wised up and ignores them again.
+var _chase_t := 0.0
+var _chase_cd := 0.0
 var _mats: Array = []
 ## Set only for the rigged goblin model; every other theme is procedural and
 ## animates through the _legs/_knees/_arms Node3D pivots instead.
@@ -1743,9 +1747,25 @@ func tick(delta: float) -> void:
 	if _retarget_t <= 0.0:
 		_retarget_t = 0.5
 		_target_chicken = game.nearest_targetable_chicken(position)
+	var pp: Vector3 = game.player.global_position
+	var to_player := Vector3(pp.x - position.x, 0, pp.z - position.z)
+	var player_dist := to_player.length()
+	# run the chase down, noting the frame it expires so the cooldown is armed
+	# once rather than being refreshed every frame afterwards
+	var chasing_before: bool = _chase_t > 0.0
+	_chase_t = maxf(0.0, _chase_t - delta)
+	_chase_cd = maxf(0.0, _chase_cd - delta)
+	if chasing_before and _chase_t <= 0.0:
+		_chase_cd = CHASE_COOLDOWN
+	if carried == null and _chase_t <= 0.0 and _chase_cd <= 0.0 and player_dist < CHASE_RANGE:
+		_chase_t = CHASE_TIME
+	var chasing: bool = _chase_t > 0.0
+
 	var dest: Vector3
 	var attacking_coop := false
-	if _target_chicken != null and is_instance_valid(_target_chicken) and _target_chicken.targetable():
+	if chasing:
+		dest = pp
+	elif _target_chicken != null and is_instance_valid(_target_chicken) and _target_chicken.targetable():
 		dest = _target_chicken.position
 	else:
 		_target_chicken = null
@@ -1753,9 +1773,20 @@ func tick(delta: float) -> void:
 		attacking_coop = true
 	var flat_d := Vector3(dest.x - position.x, 0, dest.z - position.z)
 	var dist := flat_d.length()
-	# player swipe
-	var pp: Vector3 = game.player.global_position
-	if _atk_cd <= 0.0 and Vector3(pp.x - position.x, 0, pp.z - position.z).length() < 1.8 * body_scale:
+	if chasing:
+		# planted in front of you and swinging, the way it works the coop,
+		# rather than clipping you in passing on its way somewhere else
+		if player_dist < 1.8 * body_scale:
+			if to_player.length() > 0.01:
+				rotation.y = atan2(to_player.x, to_player.z)
+			if _atk_cd <= 0.0:
+				_atk_cd = 1.2
+				_swipe_t = 1.0
+				game.damage_player(theme["dmg"])
+			_swipe(delta)
+			return
+	elif _atk_cd <= 0.0 and player_dist < 1.8 * body_scale:
+		# not hunting you, but you were in the way
 		_atk_cd = 1.2
 		_swipe_t = 1.0
 		game.damage_player(theme["dmg"])
@@ -1886,6 +1917,16 @@ func _walk_skel(speed: float, delta: float) -> void:
 ## little off the spot, so the whole creature commits to the swing rather
 ## than waving an arm at the wall.
 const SWIPE_SPEED := 2.6
+
+## Wander too close and it breaks off to come at you — but only briefly.
+## Being able to walk a whole wave away from the coop would trivialise the
+## night, so the chase is short, and after giving up the same enemy ignores
+## the player for a while rather than re-latching the instant you step back
+## into range. One already carrying a hen does not bite: it has what it came
+## for and is heading for the treeline.
+const CHASE_RANGE := 9.0
+const CHASE_TIME := 3.5
+const CHASE_COOLDOWN := 7.0
 
 ## Throws the arms out. reach is 0 at rest and 1 at full extension.
 func _swipe_arms(reach: float) -> void:
