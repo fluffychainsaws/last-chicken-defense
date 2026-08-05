@@ -22,12 +22,19 @@ const GOBLIN_BONE_R_WRIST := 13
 const GOBLIN_BONE_L_WRIST := 30
 const GOBLIN_BONE_R_HIP := 43
 const GOBLIN_BONE_L_HIP := 48
-## Degrees: swings both arms from hanging at the sides to raised overhead,
-## about the shoulder's local X and composed onto its rest rotation.
-## Negative carries them up and FORWARD, over the head. Positive raises them
-## the other way round — up and behind the skull, elbows trailing backwards,
-## which is a shrug rather than something being held up.
+## Degrees: swings the carrying arm from hanging at its side up over the
+## head, about the shoulder's local X and composed onto its rest rotation.
+## Negative carries it up and FORWARD. Positive raises it the other way, up
+## behind the skull with the elbow trailing, which reads as a shrug.
+##
+## Only one arm does this. Both arms cannot meet in front on this rig — the
+## shoulders rest wide, so any lift splays them outward as well as up, and
+## the closest a two-handed hold got left the wrists ~1.3 apart on a body
+## 1.7 tall, with the bird floating in the gap between them. One claw grips
+## it; the other stays free to swing with the walk.
 const GOBLIN_ARM_UP_SHOULDER_DEG := -150.0
+## How far the bird hangs below the claw gripping it.
+const GOBLIN_CARRY_DANGLE := 0.26
 
 const THEMES := [
 	{"id": "zombie", "name": "THE SHUFFLING DEAD", "sub": "they smell the eggs", "body": Color(0.35, 0.49, 0.29), "eye": Color(1, 0.15, 0.15), "scale": 1.0, "speed": 2.2, "hp": 50.0, "dmg": 8.0, "bounty": 4, "base": 5.0, "per": 1.6},
@@ -1721,12 +1728,9 @@ func tick(delta: float) -> void:
 			_move(out, spd * 1.15, delta)
 			if carried != null and is_instance_valid(carried):
 				if _skel != null:
-					# cradled between the raised hands, rather than floating above the head
+					# slung from the one raised claw, hanging just beneath it
 					var rw: Vector3 = _skel.get_bone_global_pose(GOBLIN_BONE_R_WRIST).origin
-					var lw: Vector3 = _skel.get_bone_global_pose(GOBLIN_BONE_L_WRIST).origin
-					# lifted clear of the skull: the wrists sit level with the top
-					# of the head in this pose, and the claws reach above them
-					carried.position = _skel.global_transform * ((rw + lw) * 0.5) + Vector3(0, 0.34, 0)
+					carried.position = _skel.global_transform * rw - Vector3(0, GOBLIN_CARRY_DANGLE, 0)
 				else:
 					carried.position = position + Vector3(0, 2.2 * body_scale, 0)
 			if Vector3(position.x, 0, position.z).length() > 70.0:
@@ -1774,10 +1778,10 @@ func tick(delta: float) -> void:
 			state = "carry"
 			if _skel != null:
 				# composed onto the rest rotation, like the walk — a bare
-				# axis-angle here would throw the shoulders' bind pose away
+				# axis-angle here would throw the shoulder's bind pose away.
+				# Right arm only; the left keeps swinging with the stride.
 				var lift := Quaternion(Vector3(1, 0, 0), deg_to_rad(GOBLIN_ARM_UP_SHOULDER_DEG))
 				_skel.set_bone_pose_rotation(GOBLIN_BONE_R_SHOULDER, _rest_rot(GOBLIN_BONE_R_SHOULDER) * lift)
-				_skel.set_bone_pose_rotation(GOBLIN_BONE_L_SHOULDER, _rest_rot(GOBLIN_BONE_L_SHOULDER) * lift)
 			game.sfx.play("grab")
 			game.ui.whisper("IT HAS ONE OF YOUR CHICKENS")
 			return
@@ -1863,13 +1867,16 @@ func _walk_skel(speed: float, delta: float) -> void:
 	var hip_i := Quaternion(Vector3(1, 0, 0), -swing * deg_to_rad(28.0))
 	_skel.set_bone_pose_rotation(GOBLIN_BONE_R_HIP, hip * _rest_rot(GOBLIN_BONE_R_HIP))
 	_skel.set_bone_pose_rotation(GOBLIN_BONE_L_HIP, hip_i * _rest_rot(GOBLIN_BONE_L_HIP))
-	# arms counter-swing against the leg on the same side — but not while it
-	# is holding a chicken overhead, or the carry pose would be swung away
+	# arms counter-swing against the leg on the same side. The right one is
+	# skipped while something is being carried — it is held up by the carry
+	# pose, and swinging it here would drop the bird to hip height every
+	# frame. The left swings either way, so a laden goblin still walks
+	# rather than glides.
+	var arm := Quaternion(Vector3(1, 0, 0), -swing * deg_to_rad(16.0))
+	var arm_i := Quaternion(Vector3(1, 0, 0), swing * deg_to_rad(16.0))
 	if carried == null:
-		var arm := Quaternion(Vector3(1, 0, 0), -swing * deg_to_rad(16.0))
-		var arm_i := Quaternion(Vector3(1, 0, 0), swing * deg_to_rad(16.0))
 		_skel.set_bone_pose_rotation(GOBLIN_BONE_R_SHOULDER, arm * _rest_rot(GOBLIN_BONE_R_SHOULDER))
-		_skel.set_bone_pose_rotation(GOBLIN_BONE_L_SHOULDER, arm_i * _rest_rot(GOBLIN_BONE_L_SHOULDER))
+	_skel.set_bone_pose_rotation(GOBLIN_BONE_L_SHOULDER, arm_i * _rest_rot(GOBLIN_BONE_L_SHOULDER))
 	# rises on each footfall (twice per cycle) and rolls onto the planted leg
 	position.y = (1.0 - cos(_stride * 2.0)) * 0.022 * body_scale
 	rotation.z = swing * 0.03
