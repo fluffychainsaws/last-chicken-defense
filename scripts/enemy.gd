@@ -22,9 +22,12 @@ const GOBLIN_BONE_R_WRIST := 13
 const GOBLIN_BONE_L_WRIST := 30
 const GOBLIN_BONE_R_HIP := 43
 const GOBLIN_BONE_L_HIP := 48
-## Degrees: swings both arms from hanging at the sides to raised overhead.
-## Applied about the shoulder's local X, composed onto its rest rotation.
-const GOBLIN_ARM_UP_SHOULDER_DEG := 120.0
+## Degrees: swings both arms from hanging at the sides to raised overhead,
+## about the shoulder's local X and composed onto its rest rotation.
+## Negative carries them up and FORWARD, over the head. Positive raises them
+## the other way round — up and behind the skull, elbows trailing backwards,
+## which is a shrug rather than something being held up.
+const GOBLIN_ARM_UP_SHOULDER_DEG := -150.0
 
 const THEMES := [
 	{"id": "zombie", "name": "THE SHUFFLING DEAD", "sub": "they smell the eggs", "body": Color(0.35, 0.49, 0.29), "eye": Color(1, 0.15, 0.15), "scale": 1.0, "speed": 2.2, "hp": 50.0, "dmg": 8.0, "bounty": 4, "base": 5.0, "per": 1.6},
@@ -1721,7 +1724,9 @@ func tick(delta: float) -> void:
 					# cradled between the raised hands, rather than floating above the head
 					var rw: Vector3 = _skel.get_bone_global_pose(GOBLIN_BONE_R_WRIST).origin
 					var lw: Vector3 = _skel.get_bone_global_pose(GOBLIN_BONE_L_WRIST).origin
-					carried.position = _skel.global_transform * ((rw + lw) * 0.5) + Vector3(0, 0.12, 0)
+					# lifted clear of the skull: the wrists sit level with the top
+					# of the head in this pose, and the claws reach above them
+					carried.position = _skel.global_transform * ((rw + lw) * 0.5) + Vector3(0, 0.34, 0)
 				else:
 					carried.position = position + Vector3(0, 2.2 * body_scale, 0)
 			if Vector3(position.x, 0, position.z).length() > 70.0:
