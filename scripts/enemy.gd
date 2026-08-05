@@ -1753,6 +1753,7 @@ func tick(delta: float) -> void:
 	var pp: Vector3 = game.player.global_position
 	if _atk_cd <= 0.0 and Vector3(pp.x - position.x, 0, pp.z - position.z).length() < 1.8 * body_scale:
 		_atk_cd = 1.2
+		_swipe_t = 1.0
 		game.damage_player(theme["dmg"])
 	if attacking_coop:
 		if dist < 2.6:
@@ -1792,6 +1793,8 @@ func tick(delta: float) -> void:
 				_chew_t = 1.8 * float(game.upgrades.fence)
 				return
 	_move(dir, spd, delta)
+	if _swipe_t > 0.0:
+		_swipe_moving(delta)
 	if flying:
 		var want_y := 9.0
 		if dist < 6.0:
@@ -1877,10 +1880,8 @@ func _walk_skel(speed: float, delta: float) -> void:
 ## than waving an arm at the wall.
 const SWIPE_SPEED := 2.6
 
-func _swipe(delta: float) -> void:
-	_swipe_t = maxf(0.0, _swipe_t - delta * SWIPE_SPEED)
-	# 0 at rest, 1 at full extension, 0 again as the arms drop back
-	var reach := sin((1.0 - _swipe_t) * PI)
+## Throws the arms out. reach is 0 at rest and 1 at full extension.
+func _swipe_arms(reach: float) -> void:
 	if _skel != null:
 		# negative throws the arms forward past the head, claws leading;
 		# positive winds them up behind instead, which reads as a shrug
@@ -1892,10 +1893,24 @@ func _swipe(delta: float) -> void:
 		# rotation.x further negative is what reaches out rather than back
 		for i in _arms.size():
 			_arms[i].rotation.x = _arm_rest[i] - reach * deg_to_rad(70.0)
-	# rise onto the blow, and drop the walk's roll so it is not leaning
-	# sideways while it hammers
+
+## The standing version, used on the coop: the whole body commits, rising
+## onto the blow with the walk's sideways roll dropped.
+func _swipe(delta: float) -> void:
+	_swipe_t = maxf(0.0, _swipe_t - delta * SWIPE_SPEED)
+	# 0 at rest, 1 at full extension, 0 again as the arms drop back
+	var reach := sin((1.0 - _swipe_t) * PI)
+	_swipe_arms(reach)
 	rotation.z = 0.0
 	position.y = reach * 0.05 * body_scale
+
+## The version thrown at the player, who is swiped at in passing rather than
+## stood in front of. The legs stay in their stride and only the arms are
+## taken over — which is why this has to run after _move(), whose _walk()
+## would otherwise put the arms straight back into the gait.
+func _swipe_moving(delta: float) -> void:
+	_swipe_t = maxf(0.0, _swipe_t - delta * SWIPE_SPEED)
+	_swipe_arms(sin((1.0 - _swipe_t) * PI))
 
 func _rest_rot(bone: int) -> Quaternion:
 	return _skel.get_bone_rest(bone).basis.get_rotation_quaternion()
