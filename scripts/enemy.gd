@@ -1709,19 +1709,33 @@ func _walk(speed: float, delta: float) -> void:
 	position.y = (1.0 - cos(_stride * 2.0)) * 0.022 * body_scale
 	rotation.z = swing * 0.03
 
-## Same cadence math as _walk(), driving the rigged goblin's hip bones
-## instead of Node3D leg pivots. Both hinge on local Z.
+## Same cadence math as _walk(), driving the rigged goblin's bones instead of
+## Node3D pivots — hips, a counter-swinging pair of arms, and the same bob and
+## roll the procedural walkers get, so the whole body moves rather than just
+## the legs scissoring under a rigid torso.
 ##
-## The swing is composed ONTO each hip's rest rotation rather than replacing
-## it. set_bone_pose_rotation() sets the bone's rotation outright, so passing
-## a bare axis-angle throws away the bind pose — and these two hips sit at
-## quite different rest orientations, so that collapsed both legs into the
-## torso rather than swinging them.
+## Every swing is applied in the bone's PARENT space (q * rest, not rest * q).
+## Post-multiplying rotates about the bone's own axes, which the rigger left
+## pointing down the limb — that swung the legs out sideways as much as
+## forward. Pre-multiplying rotates about the parent's axes, where X is the
+## character's own left/right, which is the hinge a stride actually turns on.
 func _walk_skel(speed: float, delta: float) -> void:
 	_stride += delta * speed * 3.4 / sqrt(maxf(body_scale, 0.3))
-	var swing := sin(_stride) * deg_to_rad(28.0)
-	_skel.set_bone_pose_rotation(GOBLIN_BONE_R_HIP, _rest_rot(GOBLIN_BONE_R_HIP) * Quaternion(Vector3(0, 0, 1), swing))
-	_skel.set_bone_pose_rotation(GOBLIN_BONE_L_HIP, _rest_rot(GOBLIN_BONE_L_HIP) * Quaternion(Vector3(0, 0, 1), -swing))
+	var swing := sin(_stride)
+	var hip := Quaternion(Vector3(1, 0, 0), swing * deg_to_rad(28.0))
+	var hip_i := Quaternion(Vector3(1, 0, 0), -swing * deg_to_rad(28.0))
+	_skel.set_bone_pose_rotation(GOBLIN_BONE_R_HIP, hip * _rest_rot(GOBLIN_BONE_R_HIP))
+	_skel.set_bone_pose_rotation(GOBLIN_BONE_L_HIP, hip_i * _rest_rot(GOBLIN_BONE_L_HIP))
+	# arms counter-swing against the leg on the same side — but not while it
+	# is holding a chicken overhead, or the carry pose would be swung away
+	if carried == null:
+		var arm := Quaternion(Vector3(1, 0, 0), -swing * deg_to_rad(16.0))
+		var arm_i := Quaternion(Vector3(1, 0, 0), swing * deg_to_rad(16.0))
+		_skel.set_bone_pose_rotation(GOBLIN_BONE_R_SHOULDER, arm * _rest_rot(GOBLIN_BONE_R_SHOULDER))
+		_skel.set_bone_pose_rotation(GOBLIN_BONE_L_SHOULDER, arm_i * _rest_rot(GOBLIN_BONE_L_SHOULDER))
+	# rises on each footfall (twice per cycle) and rolls onto the planted leg
+	position.y = (1.0 - cos(_stride * 2.0)) * 0.022 * body_scale
+	rotation.z = swing * 0.03
 
 func _rest_rot(bone: int) -> Quaternion:
 	return _skel.get_bone_rest(bone).basis.get_rotation_quaternion()
