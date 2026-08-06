@@ -856,6 +856,10 @@ func _start_night() -> void:
 	moon_mat.emission = moon_mat.albedo_color
 	for c in chickens:
 		c.night_mode()
+	# the stand shuts with the light, and everyone still at it clears off
+	for v in customers:
+		if is_instance_valid(v):
+			v.send_home()
 	if market_open:
 		close_market()
 	ui.night_fx(true, boss)
@@ -1369,6 +1373,10 @@ func take_from_stand(n: int) -> int:
 ## Any grown bird out in the yard is fair game for something that walked up
 ## and asked. Ones shut in the coop or already being carried off are not.
 func nearest_stealable_chicken(from: Vector3):
+	# after dark the birds are the night's problem, not a buyer's — nothing
+	# wearing a disguise gets to help itself once the stand has shut
+	if is_night:
+		return null
 	var best = null
 	var best_d := 1e9
 	for c in chickens:

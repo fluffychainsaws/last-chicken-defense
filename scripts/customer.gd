@@ -161,6 +161,12 @@ func _do_business() -> void:
 	game.add_coins(_paid)
 	game.sfx.play("coin", -8.0)
 
+## Nightfall. The stand is a daytime thing — nobody shops after dark, and the
+## ones who only came to look at the birds do not get to use the cover of it.
+## Whatever is still on the lane turns round and walks off, mid-grab or not.
+func send_home() -> void:
+	state = "leave"
+
 ## Sold a bird by the player, at the price it was asking.
 func accept_sale(bird) -> void:
 	state = "leave"
