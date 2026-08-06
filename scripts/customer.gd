@@ -44,7 +44,11 @@ func setup(g: Node3D, is_disguised: bool) -> void:
 	var from_left := randf() < 0.5
 	_exit_x = 34.0 if from_left else -34.0
 	position = Vector3(-_exit_x, 0, game.ROAD_Z + randf_range(-1.2, 1.2))
-	_target = game.stand_pos + Vector3(randf_range(-1.0, 1.0), 0, 2.2)
+	# Several people are served at once and nothing pushes them apart, so pick
+	# a spot along the frontage rather than all converging on the middle. The
+	# depth jitter keeps two who picked the same x from standing in each other.
+	var half: float = maxf(game.stand_width() * 0.5 - 0.45, 0.4)
+	_target = game.stand_pos + Vector3(randf_range(-half, half), 0, randf_range(1.9, 2.9))
 	_build_mesh()
 
 func _build_mesh() -> void:

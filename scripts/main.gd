@@ -121,8 +121,11 @@ const STAND_EGG_PRICE := 11
 ## Chance a given visitor helps itself instead of paying, worst to best stand.
 const STAND_THEFT_LOW := 0.05
 const STAND_THEFT_HIGH := 0.15
-## Roughly one visitor per this many seconds, before the tier bonus.
-const CUSTOMER_GAP := 26.0
+## Roughly one visitor per this many seconds, before the tier bonus. Several
+## are expected to be on the lane at once — arrivals are not queued behind
+## each other finishing.
+const CUSTOMER_GAP := 13.0
+const CUSTOMER_MAX := 8
 ## Full-length mirror on the bedroom's north wall. Its reflection is a second
 ## copy of the chosen farmer rendered into a SubViewport, so it can keep the
 ## hat the first-person body has to drop.
@@ -530,7 +533,7 @@ func _build_farm_stand() -> void:
 	_stand_root = root
 
 	# each tier is wider and deeper, and the roof grows with it
-	var w: float = [0.0, 3.0, 4.4, 6.0][stand_tier]
+	var w: float = stand_width()
 	var d: float = 1.9 + 0.35 * float(stand_tier)
 	var h := 2.5
 
@@ -546,8 +549,16 @@ func _build_farm_stand() -> void:
 	var roof := MK.box(root, Vector3(w + 0.9, 0.12, d + 1.1), Color.WHITE, Vector3(0, h + 0.08, 0))
 	roof.material_override = tin_m
 	roof.rotation.x = deg_to_rad(-6)
-	# back wall of planks, so it reads as a stall and not a table
-	MK.box(root, Vector3(w, 1.5, 0.1), Color.WHITE, Vector3(0, 1.3, -d * 0.5)).material_override = plank_m
+	# Walled in on three sides, so it reads as a stall and not a table, and so
+	# the only way to the goods is over the counter from the road. The planking
+	# runs the full height the collider does — a wall you can see through but
+	# not walk through is worse than no wall at all.
+	MK.box(root, Vector3(w, h, 0.1), Color.WHITE, Vector3(0, h * 0.5, -d * 0.5)).material_override = plank_m
+	MK.static_box(root, Vector3(w + 0.28, h, 0.24), Vector3(0, h * 0.5, -d * 0.5))
+	for sx in [-1.0, 1.0]:
+		MK.box(root, Vector3(0.1, h, d), Color.WHITE,
+			Vector3(sx * w * 0.5, h * 0.5, 0)).material_override = plank_m
+		MK.static_box(root, Vector3(0.3, h, d + 0.4), Vector3(sx * w * 0.5, h * 0.5, 0))
 
 	# hanging sign
 	# board first, then the lettering sized to sit inside it
@@ -1317,6 +1328,13 @@ func _stand_listing() -> Dictionary:
 	}
 
 
+## Frontage of the counter at each tier. Customers space themselves along it,
+## so the widths have to be readable from outside the builder.
+const STAND_WIDTHS := [0.0, 3.0, 4.4, 6.0]
+
+func stand_width() -> float:
+	return STAND_WIDTHS[stand_tier]
+
 ## How many eggs the counter holds. A bigger stand is worth buying mostly
 ## because it can carry more between visits to it.
 func stand_capacity() -> int:
@@ -1421,7 +1439,7 @@ func _update_customers(delta: float) -> void:
 	# a bigger stand is seen from further down the road, so custom picks up
 	_customer_t = CUSTOMER_GAP / (1.0 + 0.45 * float(stand_tier - 1))
 	_customer_t *= randf_range(0.7, 1.4)
-	if customers.size() >= 4:
+	if customers.size() >= CUSTOMER_MAX:
 		return
 	# nothing to sell and nothing worth stealing means nobody bothers, unless
 	# it is one of the ones that came for the birds
