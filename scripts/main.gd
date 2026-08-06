@@ -709,8 +709,10 @@ func _build_grass() -> void:
 			continue
 		if absf(x - 22.0) < 6.5 and absf(z + 1.0) < 5.5:
 			continue  # dirt run
-		if absf(x) < 1.4 and z > 3.0 and z < 20.5:
-			continue  # path
+		if absf(x) < 1.4 and z > 3.0 and z < ROAD_Z + 0.2:
+			continue  # path, all the way up to where it meets the lane
+		if absf(z - ROAD_Z) < 3.2:
+			continue  # the lane
 		if absf(x + 20.0) < 6.8 and absf(z + 12.0) < 5.8:
 			continue  # house
 		if absf(x - 20.0) < 2.5 and absf(z + 12.0) < 2.2:
