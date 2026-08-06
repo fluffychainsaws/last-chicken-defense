@@ -12,6 +12,9 @@ var state := "wander"
 var forager := false
 var is_chick := false
 var age := 0.0
+## Nights survived. A bird that has lived through the yard a while is worth
+## more than a fresh one, which is what the farm stand prices against.
+var days_survived := 0
 
 var _target := Vector3.ZERO
 var _timer := 0.0
@@ -144,6 +147,26 @@ func refresh_class() -> void:
 	if _body_mat != null and class_id != "hen":
 		_body_mat.albedo_color = stats["colour"]
 	_rebuild_gear()
+
+## What a buyer at the farm stand will pay. Starts modest and climbs with
+## every night the bird has come through, so a long-serving hen is a real
+## loss to hand over — which is the point, given who turns up asking.
+## Training counts too: an armed, promoted hen is not the same animal.
+const VALUE_BASE := 40
+const VALUE_PER_DAY := 5
+const VALUE_PER_POINT := 14
+
+func value() -> int:
+	var v := VALUE_BASE + VALUE_PER_DAY * days_survived
+	v += VALUE_PER_POINT * CL.points_spent(tracks)
+	if class_id != "hen":
+		v += int(CL.base_of(class_id).get("price", 0)) / 2
+	if helmeted:
+		v += 40
+	if is_chick:
+		# not grown, not laying, and half the bird
+		v = int(v * 0.4)
+	return v
 
 func title() -> String:
 	return CL.title(class_id, spec_id, tracks)

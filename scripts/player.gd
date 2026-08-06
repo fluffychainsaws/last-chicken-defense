@@ -256,6 +256,22 @@ func _interact_scan() -> void:
 	elif game.is_day() and position.distance_to(game.coop_pos) < 4.5 and game.coop_hp < game.max_coop_hp():
 		ctx = "repair"
 		prompt = "[HOLD E]  REPAIR COOP  (%d%%)" % int(100.0 * game.coop_hp / game.max_coop_hp())
+	elif game.stand_tier > 0 and position.distance_to(game.stand_pos) < 3.0:
+		var buyer = game.waiting_buyer()
+		if buyer != null and position.distance_to(buyer.position) < 4.0:
+			var bird = game.nearest_stealable_chicken(game.stand_pos)
+			if bird != null:
+				ctx = "sell_bird"
+				prompt = "[E]  SELL A HEN FOR $%d   (%s)" % [buyer.offer_price(bird), bird.title()]
+		if prompt == null:
+			ctx = "stand"
+			var room: int = game.stand_capacity() - game.stand_eggs
+			if game.eggs > 0 and room > 0:
+				prompt = "[E]  STOCK THE STAND   (%d/%d out, %d eggs in hand)" % [game.stand_eggs, game.stand_capacity(), game.eggs]
+			elif room <= 0:
+				prompt = "THE STAND IS FULL   (%d/%d)" % [game.stand_eggs, game.stand_capacity()]
+			else:
+				prompt = "THE STAND IS EMPTY   (no eggs in hand)"
 	elif game.is_day() and position.distance_to(game.kiosk_pos) < 1.6:
 		# the kiosk's own counter is only ~1.9m wide and 0.7m deep; this used
 		# to trigger from 3.2m away, well outside the stand itself, so just
@@ -280,6 +296,19 @@ func _interact_scan() -> void:
 				game.open_market()
 			"roost":
 				game.open_coop()
+			"stand":
+				var moved: int = game.stock_stand(99)
+				if moved > 0:
+					game.ui.whisper("put out %d" % moved)
+				else:
+					game.sfx.play("denied")
+			"sell_bird":
+				var buyer = game.waiting_buyer()
+				var bird = game.nearest_stealable_chicken(game.stand_pos)
+				if buyer != null and bird != null:
+					buyer.accept_sale(bird)
+				else:
+					game.sfx.play("denied")
 			"bed":
 				if game.is_night:
 					game.sfx.play("denied")

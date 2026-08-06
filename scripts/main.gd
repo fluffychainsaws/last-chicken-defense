@@ -9,6 +9,7 @@ const EnemyScript = preload("res://scripts/enemy.gd")
 const PlayerScript = preload("res://scripts/player.gd")
 const UIScript = preload("res://scripts/game_ui.gd")
 const SfxScript = preload("res://scripts/sfx.gd")
+const CustomerScript = preload("res://scripts/customer.gd")
 const CL = preload("res://scripts/classes.gd")
 
 const DAY_LEN := 170.0
@@ -101,6 +102,27 @@ var coop_door := Vector3(1.6, 0, 0)
 ## The upgrade kiosk stands beside the coop rather than on it, so training the
 ## flock is its own place in the yard instead of a second use of the building.
 var kiosk_pos := Vector3(0.4, 0.0, 3.4)
+## The roadside stand sits outside the fence on the house's side of the lane,
+## so passers-by can reach it without ever entering the yard.
+const ROAD_Z := 27.0
+var stand_pos := Vector3(-9.0, 0.0, 23.2)
+## 0 = not built yet. Each tier is a bigger stand that holds more and draws
+## more custom.
+var stand_tier := 0
+var _stand_root: Node3D = null
+## Eggs left out on the counter. Sold unattended, so this is the only thing
+## standing between a passer-by and an empty stand.
+var stand_eggs := 0
+var customers: Array = []
+var _customer_t := 12.0
+## The stand pays better than shipping to the market over the computer —
+## that premium is the whole reason to put goods out where they can be taken.
+const STAND_EGG_PRICE := 11
+## Chance a given visitor helps itself instead of paying, worst to best stand.
+const STAND_THEFT_LOW := 0.05
+const STAND_THEFT_HIGH := 0.15
+## Roughly one visitor per this many seconds, before the tier bonus.
+const CUSTOMER_GAP := 26.0
 ## Full-length mirror on the bedroom's north wall. Its reflection is a second
 ## copy of the chosen farmer rendered into a SubViewport, so it can keep the
 ## hat the first-person body has to drop.
@@ -277,11 +299,15 @@ func _build_world() -> void:
 	# dirt in the chicken run + path to the gate
 	var dirt := MK.box(self, Vector3(12, 0.04, 10), Color.WHITE, Vector3(22, 0.02, -1))
 	dirt.material_override = MK.tex_mat(Color(0.8, 0.62, 0.4), _ground_tex, 6.0, 1.0, _ground_norm)
-	var path := MK.box(self, Vector3(2.2, 0.04, 16), Color.WHITE, Vector3(0, 0.02, 12))
+	var path := MK.box(self, Vector3(2.2, 0.04, 23), Color.WHITE, Vector3(0, 0.02, 15.5))
 	path.material_override = MK.tex_mat(Color(0.9, 0.82, 0.62), _ground_tex, 3.0, 1.0, _ground_norm)
+	# the road the stand faces, running past the property beyond the fence
+	var road := MK.box(self, Vector3(150, 0.04, 6.0), Color.WHITE, Vector3(0, 0.025, ROAD_Z))
+	road.material_override = MK.tex_mat(Color(0.76, 0.66, 0.5), _ground_tex, 26.0, 1.0, _ground_norm)
 	_build_house()
 	_build_coop()
 	_build_kiosk()
+	_build_farm_stand()
 	_build_perimeter_fence()
 	_build_forest()
 	_build_grass()
@@ -481,6 +507,85 @@ func _update_mirror() -> void:
 		var clip: String = player._body_anim.current_animation
 		if clip != "" and _mirror_anim.has_animation(clip) and _mirror_anim.current_animation != clip:
 			_mirror_anim.play(clip)
+
+## The roadside stand. Rebuilt from scratch on every upgrade rather than
+## added to, so a tier is one description of a whole stand instead of a
+## pile of conditional extras — much easier to keep straight as it grows.
+## Tier 0 builds nothing at all: the stand does not exist until it is bought.
+func _build_farm_stand() -> void:
+	if _stand_root != null:
+		_stand_root.queue_free()
+		_stand_root = null
+	if stand_tier <= 0:
+		return
+	var post_m := MK.tex_mat(Color(0.52, 0.4, 0.26), _wood_tex, 2.0, 0.92, _wood_norm)
+	var plank_m := MK.tex_mat(Color(0.68, 0.55, 0.37), _wood_tex, 2.4, 0.9, _wood_norm)
+	var tin_m := MK.mat(Color(0.74, 0.76, 0.78))
+	tin_m.metallic = 0.55
+	tin_m.roughness = 0.42
+
+	var root := Node3D.new()
+	root.position = stand_pos
+	add_child(root)
+	_stand_root = root
+
+	# each tier is wider and deeper, and the roof grows with it
+	var w: float = [0.0, 3.0, 4.4, 6.0][stand_tier]
+	var d: float = 1.9 + 0.35 * float(stand_tier)
+	var h := 2.5
+
+	# counter the goods sit on, facing the road (+z)
+	MK.static_box(root, Vector3(w, 1.0, 0.75), Vector3(0, 0.5, d * 0.32))
+	MK.box(root, Vector3(w, 1.0, 0.75), Color.WHITE, Vector3(0, 0.5, d * 0.32)).material_override = plank_m
+	MK.box(root, Vector3(w + 0.3, 0.09, 0.95), Color.WHITE, Vector3(0, 1.05, d * 0.32)).material_override = post_m
+	# corner posts and the tin roof over them
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			MK.box(root, Vector3(0.14, h, 0.14), Color.WHITE,
+				Vector3(sx * w * 0.5, h * 0.5, sz * d * 0.5)).material_override = post_m
+	var roof := MK.box(root, Vector3(w + 0.9, 0.12, d + 1.1), Color.WHITE, Vector3(0, h + 0.08, 0))
+	roof.material_override = tin_m
+	roof.rotation.x = deg_to_rad(-6)
+	# back wall of planks, so it reads as a stall and not a table
+	MK.box(root, Vector3(w, 1.5, 0.1), Color.WHITE, Vector3(0, 1.3, -d * 0.5)).material_override = plank_m
+
+	# hanging sign
+	# board first, then the lettering sized to sit inside it
+	var board_w: float = minf(w * 0.82, 2.7)
+	MK.box(root, Vector3(board_w, 0.46, 0.06), Color(0.93, 0.9, 0.82),
+		Vector3(0, h - 0.42, d * 0.5 + 0.02))
+	var sign := Label3D.new()
+	sign.text = "HOMESTEAD"
+	sign.font_size = 64
+	# 9 characters at roughly 0.52 em each, fitted to the board with a margin
+	sign.pixel_size = (board_w * 0.86) / (9.0 * 0.52 * 64.0)
+	sign.modulate = Color(0.22, 0.17, 0.12)
+	sign.outline_size = 0
+	sign.position = Vector3(0, h - 0.42, d * 0.5 + 0.06)
+	sign.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	sign.double_sided = false
+	root.add_child(sign)
+
+	# tiered shelves of crates, more of them the bigger the stand gets
+	var crates: int = 2 + stand_tier * 2
+	var produce := [
+		Color(0.85, 0.35, 0.16), Color(0.92, 0.66, 0.16), Color(0.86, 0.82, 0.3),
+		Color(0.45, 0.6, 0.25), Color(0.75, 0.28, 0.3),
+	]
+	for i in crates:
+		var t := (float(i) / maxf(1.0, float(crates - 1))) - 0.5
+		var cx := t * (w - 0.9)
+		var shelf: float = 1.12 if i % 2 == 0 else 1.62
+		MK.box(root, Vector3(0.62, 0.34, 0.5), Color(0.6, 0.47, 0.3), Vector3(cx, shelf + 0.17, d * 0.28))
+		# a heap of whatever is in season poking out of the top
+		for k in 5:
+			MK.sphere(root, randf_range(0.07, 0.11), produce[(i + k) % produce.size()],
+				Vector3(cx + randf_range(-0.2, 0.2), shelf + 0.4, d * 0.28 + randf_range(-0.16, 0.16)))
+		if i % 2 == 1:
+			MK.box(root, Vector3(w * 0.9, 0.07, 0.55), Color.WHITE, Vector3(0, shelf, d * 0.28)).material_override = plank_m
+
+	# the honesty box customers drop money into
+	MK.box(root, Vector3(0.32, 0.26, 0.24), Color(0.35, 0.27, 0.18), Vector3(w * 0.5 - 0.3, 1.18, d * 0.32))
 
 func _tex_wall(size: Vector3, pos: Vector3, m: Material) -> void:
 	MK.static_box(self, size, pos)
@@ -706,6 +811,7 @@ func _process(delta: float) -> void:
 	_update_projectiles(delta)
 	_update_minions(delta)
 	_update_deliveries(delta)
+	_update_customers(delta)
 	_update_particles(delta)
 	_update_pickups()
 	_update_mirror()
@@ -762,6 +868,7 @@ func _start_dawn() -> void:
 		sfx.crow(-5.0)
 	var laid := 0
 	for c in chickens:
+		c.days_survived += 1
 		c.day_mode()
 		if not c.is_chick:
 			laid += 1
@@ -845,6 +952,14 @@ func melee_attack(origin: Vector3, dir: Vector3) -> void:
 		if d < best_d and to.normalized().dot(dir) > 0.5:
 			best = e
 			best_d = d
+	# anything loitering at the stand is hittable too, which is the only way
+	# to see off a buyer that turned up for the birds
+	for v in customers:
+		var tov: Vector3 = v.position + Vector3(0, 1.2, 0) - origin
+		var dv := tov.length()
+		if dv < best_d and tov.normalized().dot(dir) > 0.5:
+			best = v
+			best_d = dv
 	# friendly fire is a day-only mistake — at night the flock is either
 	# hidden or already fighting for its life
 	if is_day():
@@ -875,6 +990,13 @@ func shotgun_attack(origin: Vector3, dir: Vector3) -> void:
 			if perp < 0.7 * maxf(1.0, e.body_scale):
 				best = e
 				best_t = t
+		for v in customers:
+			var vc: Vector3 = v.position + Vector3(0, 1.2, 0)
+			var tov := vc - origin
+			var tv := tov.dot(pd)
+			if tv >= 0.5 and tv <= best_t and (tov - pd * tv).length() < 0.6:
+				best = v
+				best_t = tv
 		if is_day():
 			for c in chickens:
 				if not c.targetable():
@@ -1172,6 +1294,145 @@ func nearest_chicken(pos: Vector3, radius: float):
 
 # ---------------- chicken events ----------------
 
+# ---------------- the farm stand ----------------
+
+const STAND_TIER_MAX := 3
+const STAND_PRICES := [180, 420, 900]
+
+## One market row that covers buying the stand and every upgrade after it.
+func _stand_listing() -> Dictionary:
+	if stand_tier >= STAND_TIER_MAX:
+		return {"id": "stand", "name": "FARM STAND", "desc": "as big as the lane will take.", "price": 0, "owned": true}
+	var price: int = STAND_PRICES[stand_tier]
+	if stand_tier == 0:
+		return {
+			"id": "stand", "name": "ROADSIDE FARM STAND",
+			"desc": "a counter by the lane. leave eggs on it and passers-by pay $%d each, against $6 shipping them from here. nobody minds the till, so a few will help themselves." % STAND_EGG_PRICE,
+			"price": price, "owned": false,
+		}
+	return {
+		"id": "stand", "name": "ENLARGE THE STAND (tier %d)" % (stand_tier + 1),
+		"desc": "holds %d eggs instead of %d, is seen from further down the lane, and looks tended enough that fewer people chance it." % [8 * (stand_tier + 1), stand_capacity()],
+		"price": price, "owned": false,
+	}
+
+
+## How many eggs the counter holds. A bigger stand is worth buying mostly
+## because it can carry more between visits to it.
+func stand_capacity() -> int:
+	return 8 * stand_tier
+
+## Better stands look tended, and tended stands get robbed less.
+func stand_theft_chance() -> float:
+	if stand_tier <= 1:
+		return STAND_THEFT_HIGH
+	return lerpf(STAND_THEFT_HIGH, STAND_THEFT_LOW, float(stand_tier - 1) / 2.0)
+
+## Move eggs from the player's basket onto the counter. Returns how many
+## actually fitted, so the caller can say something useful about the rest.
+func stock_stand(n: int) -> int:
+	var room := stand_capacity() - stand_eggs
+	var moved := mini(mini(n, eggs), room)
+	if moved <= 0:
+		return 0
+	eggs -= moved
+	stand_eggs += moved
+	sfx.play("grab", -10.0)
+	ui.refresh()
+	return moved
+
+## A customer taking goods off the counter, paid for or not.
+func take_from_stand(n: int) -> int:
+	var got := mini(n, stand_eggs)
+	stand_eggs -= got
+	ui.refresh()
+	return got
+
+## Any grown bird out in the yard is fair game for something that walked up
+## and asked. Ones shut in the coop or already being carried off are not.
+func nearest_stealable_chicken(from: Vector3):
+	var best = null
+	var best_d := 1e9
+	for c in chickens:
+		if not c.targetable() or c.is_chick:
+			continue
+		var d: float = from.distance_to(c.position)
+		if d < best_d:
+			best = c
+			best_d = d
+	return best
+
+func chicken_stolen_by_buyer(c: Node3D) -> void:
+	if c == null or not chickens.has(c):
+		return
+	chickens.erase(c)
+	spawn_poof(c.position + Vector3(0, 0.5, 0), Color(0.4, 0.7, 0.35), 10)
+	c.queue_free()
+	ui.announce("YOU HAVE BEEN ROBBED", "it was never here to buy anything", true)
+	ui.refresh()
+	_check_game_over()
+
+func chicken_sold_to_buyer(c: Node3D, price: int) -> void:
+	if c == null or not chickens.has(c):
+		return
+	chickens.erase(c)
+	add_coins(price)
+	sfx.play("coin")
+	spawn_poof(c.position + Vector3(0, 0.5, 0), Color(0.9, 0.85, 0.6), 8)
+	c.queue_free()
+	ui.whisper("sold, for $%d" % price)
+	ui.refresh()
+	_check_game_over()
+
+## Anyone loitering at the counter with an offer open.
+func waiting_buyer():
+	for v in customers:
+		if v.disguised and v.state == "offer":
+			return v
+	return null
+
+func customer_gone(v: Node3D) -> void:
+	if not customers.has(v):
+		return
+	customers.erase(v)
+	v.queue_free()
+
+func nearest_customer(pos: Vector3, radius: float):
+	var best = null
+	var best_d := radius
+	for v in customers:
+		var d: float = pos.distance_to(v.position)
+		if d < best_d:
+			best = v
+			best_d = d
+	return best
+
+## Trade only happens in daylight; after dark the road belongs to whatever
+## comes out of the trees.
+func _update_customers(delta: float) -> void:
+	for v in customers.duplicate():
+		if is_instance_valid(v):
+			v.tick(delta)
+	if stand_tier <= 0 or is_night:
+		return
+	_customer_t -= delta
+	if _customer_t > 0.0:
+		return
+	# a bigger stand is seen from further down the road, so custom picks up
+	_customer_t = CUSTOMER_GAP / (1.0 + 0.45 * float(stand_tier - 1))
+	_customer_t *= randf_range(0.7, 1.4)
+	if customers.size() >= 4:
+		return
+	# nothing to sell and nothing worth stealing means nobody bothers, unless
+	# it is one of the ones that came for the birds
+	var pretender := randf() < 0.22 and chickens.size() > 2
+	if stand_eggs <= 0 and not pretender:
+		return
+	var v = CustomerScript.new()
+	add_child(v)
+	v.setup(self, pretender)
+	customers.append(v)
+
 # ---------------- helmet deliveries ----------------
 
 ## Each helmet is bought for one hen, and the next one costs more. Escalating
@@ -1404,6 +1665,7 @@ func market_items() -> Array:
 		{"id": "feed5", "name": "CHICKEN FEED x5", "desc": "throw it. a chicken will come eat it and heal 30 hp.", "price": 12, "owned": false},
 		{"id": "shotgun", "name": "PUMP SHOTGUN", "desc": "the farmer's argument. includes 8 shells.", "price": 150, "owned": upgrades.shotgun},
 		{"id": "shells8", "name": "SHELLS x8", "desc": "arguments, refilled.", "price": 20, "owned": false},
+		_stand_listing(),
 		{"id": "helmets", "name": "TINY WAR HELMET", "desc": "fits one hen. she fights at night instead of hiding. air-dropped, because the supplier insists. (%d of %d kitted)" % [helmets_owned(), chickens.size()], "price": helmet_price(), "owned": helmets_owned() >= chickens.size()},
 		{"id": "turret", "name": "EGG TURRET", "desc": "automated yolk-based yard defense.", "price": 250, "owned": upgrades.turret},
 		{"id": "shoes", "name": "RUNNING SHOES", "desc": "+25% farmer speed. they light up. tactically.", "price": 90, "owned": upgrades.shoes},
@@ -1442,6 +1704,11 @@ func buy(id: String) -> void:
 			shells += 8
 		"shells8":
 			shells += 8
+		"stand":
+			stand_tier += 1
+			_build_farm_stand()
+			if stand_tier == 1:
+				ui.announce("THE STAND IS OPEN", "put eggs out and people will come")
 		"helmets":
 			if not _deliver_helmet():
 				return
@@ -1673,7 +1940,7 @@ func _save_game() -> void:
 	# progression is per bird, so the roster is stored, not just a count
 	var flock := []
 	for c in chickens:
-		flock.append({"class": c.class_id, "spec": c.spec_id, "tracks": c.tracks, "helm": c.helmeted})
+		flock.append({"class": c.class_id, "spec": c.spec_id, "tracks": c.tracks, "helm": c.helmeted, "days": c.days_survived})
 	var crew := []
 	for r in roosters:
 		crew.append({"class": "rooster", "spec": r.spec_id, "tracks": r.tracks})
@@ -1681,6 +1948,7 @@ func _save_game() -> void:
 		"coins": coins, "day": day_num, "eggs": eggs, "feed": feed, "shells": shells,
 		"hens": hens, "roosters": roosters.size(), "coop_hp": coop_hp, "upgrades": upgrades,
 		"flock": flock, "crew": crew, "gender": player_gender,
+		"stand_tier": stand_tier, "stand_eggs": stand_eggs,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	f.store_string(JSON.stringify(data))
@@ -1701,6 +1969,9 @@ func _load_game() -> void:
 	shells = int(data.get("shells", 0))
 	coop_hp = float(data.get("coop_hp", 300.0))
 	player_gender = str(data.get("gender", "male"))
+	stand_tier = clampi(int(data.get("stand_tier", 0)), 0, STAND_TIER_MAX)
+	stand_eggs = int(data.get("stand_eggs", 0))
+	_build_farm_stand()
 	var loaded_upgrades = data.get("upgrades", {})
 	for k in upgrades:
 		if loaded_upgrades.has(k):
@@ -1733,6 +2004,8 @@ func _restore_progression(birds: Array, saved) -> void:
 		if "helm" in row and "helmeted" in birds[i]:
 			birds[i].helmeted = bool(row["helm"])
 		birds[i].spec_id = str(row.get("spec", ""))
+		if "days" in row and "days_survived" in birds[i]:
+			birds[i].days_survived = int(row["days"])
 		var tr = row.get("tracks", {})
 		if tr is Dictionary:
 			var clean := CL.new_tracks()
