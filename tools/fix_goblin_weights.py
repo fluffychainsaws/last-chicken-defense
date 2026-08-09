@@ -1,5 +1,17 @@
 """Repair the goblin's hand/foot skin weights and export a fixed glb.
 
+RETIRED. This was written for the first goblin — a hunched, feral model on a
+53-bone UniRig auto-rig whose bones were called Bone_023 and the like. That model
+has been replaced by a Mixamo-rigged warrior whose weights are already clean,
+because it stands A-posed with no limb near another, so nothing in the repo needs
+this any more and the bone names below no longer resolve.
+
+It is kept because the method generalises to any future auto-rigged upload, which
+is a thing that has happened three times now. Point SRC at the new export and
+replace the four bone names in ARM_BONES and LEG_BONES; everything else is
+topology and works on any mesh. See docs/goblin-rig.md for the measurements it
+achieved and why each step is there.
+
 The auto-rigger weighted this model by proximity, and the goblin stands hunched
 with its claws down by its toes, so ~1400 vertices came out pulled partly by an
 arm bone and partly by a leg bone. Averaging two limbs that move in opposite

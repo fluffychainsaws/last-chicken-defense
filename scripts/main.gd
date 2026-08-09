@@ -941,6 +941,11 @@ func remove_enemy(e: Node3D, give_bounty: bool) -> void:
 		sfx.play("coin", -6.0)
 		spawn_poof(e.position + Vector3(0, 1, 0), e.theme.body, 10)
 		_try_raise(e.position)
+		# Anything with a rig falls over and lies there rather than vanishing
+		# mid-stride, and frees itself once it has finished. Everything else —
+		# the procedural bodies, and the whole web build — goes as it always did.
+		if e.state != "burn" and e.has_method("begin_death") and e.begin_death():
+			return
 	e.queue_free()
 
 ## A necromancer in range of a fresh corpse gets it back on its feet, fighting

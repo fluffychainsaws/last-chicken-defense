@@ -12,29 +12,40 @@ const GOBLIN_MODEL_FOOT_OFFSET := 0.0
 ## Yaw correction so the model's face points along +Z like the procedural enemies.
 const GOBLIN_MODEL_YAW := 0.0
 
-## Bone indices in the authored rig (UniRig auto-rig; names are generic, but the
-## hierarchy and index order are stable across every instance from this file).
-## Found by rendering candidate rotations and checking the result — the rig
-## carries no semantic bone names to go on. Every hinge here swings on local Z.
-const GOBLIN_BONE_R_SHOULDER := 9
-const GOBLIN_BONE_L_SHOULDER := 26
-const GOBLIN_BONE_R_WRIST := 13
-const GOBLIN_BONE_L_WRIST := 30
-const GOBLIN_BONE_R_HIP := 43
-const GOBLIN_BONE_L_HIP := 48
-## Degrees: swings the carrying arm from hanging at its side up over the
-## head, about the shoulder's local X and composed onto its rest rotation.
-## Negative carries it up and FORWARD. Positive raises it the other way, up
-## behind the skull with the elbow trailing, which reads as a shrug.
-##
-## Only one arm does this. Both arms cannot meet in front on this rig — the
-## shoulders rest wide, so any lift splays them outward as well as up, and
-## the closest a two-handed hold got left the wrists ~1.3 apart on a body
-## 1.7 tall, with the bird floating in the gap between them. One claw grips
-## it; the other stays free to swing with the walk.
-const GOBLIN_ARM_UP_SHOULDER_DEG := -150.0
-## How far the bird hangs below the claw gripping it.
+## This rig names its bones, so the one bone we still need at runtime is looked
+## up by name rather than by index. The previous model was an auto-rig whose
+## bones were called Bone_023 and the like, and every index in here had to be
+## found by rendering candidate rotations; a re-export that reordered them would
+## have silently animated the wrong limb. A name survives that.
+const GOBLIN_CARRY_BONE := "RightHand"
+## How far the bird hangs below the hand gripping it.
 const GOBLIN_CARRY_DANGLE := 0.26
+
+## The clips that ship in the model, mapped to what the goblin is doing. Only
+## these six are wired up; Knock_Down, Dead and Fall_Dead_from_Abdominal_Injury
+## also exist and are left to the ragdoll and to whatever wants them later.
+const GOBLIN_ANIM_WALK := "Walking"
+const GOBLIN_ANIM_RUN := "Running"
+const GOBLIN_ANIM_ATTACK := "Weapon_Combo"
+const GOBLIN_ANIM_GRAB := "Male_Run_Forward_Pick_Up_Left"
+## An umbrella held overhead and a chicken held overhead are the same pose.
+const GOBLIN_ANIM_CARRY := "Walk_with_Umbrella"
+const GOBLIN_ANIM_SCREAM := "Zombie_Scream"
+## Three ways to go down, picked at random so a wave doesn't die in unison. All
+## three carry big rotations — the model rolls as it falls — which is why the
+## yaw flattening deliberately leaves them alone.
+const GOBLIN_ANIM_DEATHS := ["Dead", "Fall_Dead_from_Abdominal_Injury", "Knock_Down"]
+## How long a body lies there after its fall finishes before it fades out.
+const GOBLIN_CORPSE_LINGER := 1.6
+## And how long the fade itself takes.
+const GOBLIN_CORPSE_FADE := 0.8
+## Ground speed the walk cycle was authored against. Playback is scaled off this
+## so the feet keep up with the body instead of skating, and it is the walk that
+## sets the reference because that is what most of a night is spent doing.
+const GOBLIN_ANIM_REF_SPEED := 2.2
+## Weapon_Combo runs 3.7s and a single swipe lasts about a third of that second,
+## so the clip is hurried along to fit a whole swing into the window.
+const GOBLIN_ATTACK_RATE := 2.4
 
 const THEMES := [
 	{"id": "zombie", "name": "THE SHUFFLING DEAD", "sub": "they smell the eggs", "body": Color(0.35, 0.49, 0.29), "eye": Color(1, 0.15, 0.15), "scale": 1.0, "speed": 2.2, "hp": 50.0, "dmg": 8.0, "bounty": 4, "base": 5.0, "per": 1.6},
@@ -103,6 +114,14 @@ var _mats: Array = []
 ## Set only for the rigged goblin model; every other theme is procedural and
 ## animates through the _legs/_knees/_arms Node3D pivots instead.
 var _skel: Skeleton3D = null
+## Present only on the authored goblin. When it is, the rig is driven by its
+## own clips and every procedural gait and swipe in here stands down.
+var _anim: AnimationPlayer = null
+var _clip := ""
+var _carry_bone := -1
+## Set once the corpse is falling, so a second hit landing in the same frame
+## cannot start the death over and leave the body twitching.
+var _dying := false
 
 func setup(g: Node3D, night: int, thm: Dictionary, escort := false) -> void:
 	game = g
@@ -209,6 +228,90 @@ static func _first_skeleton(n: Node) -> Skeleton3D:
 			return found
 	return null
 
+static func _first_anim(n: Node) -> AnimationPlayer:
+	if n is AnimationPlayer:
+		return n
+	for c in n.get_children():
+		var found := _first_anim(c)
+		if found != null:
+			return found
+	return null
+
+## These clips were authored with root motion: the attack lunges 2.2 m forward,
+## the pick-up travels 5 m, and the carry walk drifts 1.2 m per cycle. Here the
+## body's position belongs to the game — code decides where a goblin is and the
+## clip is only meant to say what shape it makes — so that translation slid the
+## mesh right off the creature it was supposed to be, out of reach of the coop it
+## was busy tearing at.
+##
+## So the root bone's horizontal position is pinned to its rest value while the
+## vertical is left alone: on a walk that Y is the bob, and on a death it is the
+## fall to the ground, both of which we want. It costs a few centimetres of hip
+## sway on the walk, since there is no way to tell sway from drift in a single
+## channel, and that is a cheap trade for a goblin that stays where it is.
+##
+## The Animation resources are shared between every goblin loaded from the scene,
+## so this checks whether the work is already done rather than repeating it — and
+## checking beats a static flag, which would lie if the resource cache ever
+## dropped the clips and handed a later spawn a fresh unpinned copy.
+static func _pin_root(ap: AnimationPlayer, skel: Skeleton3D) -> void:
+	var hips := skel.find_bone("Hips")
+	if hips < 0:
+		return
+	var rest: Vector3 = skel.get_bone_rest(hips).origin
+	for clip in ap.get_animation_list():
+		var anim: Animation = ap.get_animation(clip)
+		for t in anim.get_track_count():
+			if anim.track_get_type(t) != Animation.TYPE_POSITION_3D:
+				continue
+			if not str(anim.track_get_path(t)).ends_with(":Hips"):
+				continue
+			var keys := anim.track_get_key_count(t)
+			if keys == 0:
+				continue
+			var first: Vector3 = anim.track_get_key_value(t, 0)
+			if is_equal_approx(first.x, rest.x) and is_equal_approx(first.z, rest.z):
+				continue  # already pinned
+			for k in keys:
+				var v: Vector3 = anim.track_get_key_value(t, k)
+				anim.track_set_key_value(t, k, Vector3(rest.x, v.y, rest.z))
+	_pin_yaw(ap, GOBLIN_ANIM_ATTACK)
+
+## Weapon_Combo turns the hips through 165 degrees, because it was authored as a
+## spinning multi-hit sequence for a character who chooses where to face. Ours
+## does not: it is planted in front of the coop it is tearing at, and code has
+## already turned it to face that. Left alone the goblin swings away from the
+## thing it is attacking, which looks less like a combo than a tantrum.
+##
+## So the yaw is flattened to whatever the clip starts at, while pitch and roll
+## are kept — those are the windup and the lean, and they are most of what sells
+## the blow. The gait clips are left alone; their 15-23 degrees is hip sway and
+## removing it would make the walk read as a mannequin on rails.
+static func _pin_yaw(ap: AnimationPlayer, clip: String) -> void:
+	if not ap.has_animation(clip):
+		return
+	var anim: Animation = ap.get_animation(clip)
+	for t in anim.get_track_count():
+		if anim.track_get_type(t) != Animation.TYPE_ROTATION_3D:
+			continue
+		if not str(anim.track_get_path(t)).ends_with(":Hips"):
+			continue
+		var keys := anim.track_get_key_count(t)
+		if keys == 0:
+			continue
+		var base: Quaternion = anim.track_get_key_value(t, 0)
+		var base_yaw: float = base.get_euler().y
+		var spread := 0.0
+		for k in keys:
+			var q: Quaternion = anim.track_get_key_value(t, k)
+			spread = maxf(spread, absf(q.get_euler().y - base_yaw))
+		if spread < deg_to_rad(1.0):
+			return  # already flattened
+		for k in keys:
+			var q2: Quaternion = anim.track_get_key_value(t, k)
+			var e: Vector3 = q2.get_euler()
+			anim.track_set_key_value(t, k, Quaternion.from_euler(Vector3(e.x, base_yaw, e.z)))
+
 ## Authored goblin: a real rig, instantiated whole rather than baked into a
 ## shared static mesh, since a posed skeleton can't be shared across
 ## instances the way rest-pose geometry could. The mesh is light (~14k verts)
@@ -222,10 +325,15 @@ func _build_goblin_model(s: float) -> void:
 		_build_goblin_procedural(s)
 		return
 	_skel = skel
-	# The hand/foot skin weights used to be unpicked here at runtime — the
-	# auto-rigger had blended the claws into the toes, so raising an arm dragged
-	# the feet with it. That repair is baked into models/goblin.glb now (see
-	# tools/fix_goblin_weights.py), so the mesh loads ready to use.
+	_carry_bone = skel.find_bone(GOBLIN_CARRY_BONE)
+	_anim = _first_anim(inst)
+	if _anim != null:
+		# The gait clips are one cycle each and import without looping, so they
+		# would play once and freeze mid-stride. The one-shots are left alone.
+		for clip in [GOBLIN_ANIM_WALK, GOBLIN_ANIM_RUN, GOBLIN_ANIM_CARRY]:
+			if _anim.has_animation(clip):
+				_anim.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
+		_pin_root(_anim, skel)
 	var holder := Node3D.new()
 	holder.add_child(inst)
 	# theme scale 0.75 should read as a ~1.5 m goblin
@@ -235,13 +343,24 @@ func _build_goblin_model(s: float) -> void:
 	holder.position.y = GOBLIN_MODEL_FOOT_OFFSET * ms
 	holder.rotation.y = deg_to_rad(GOBLIN_MODEL_YAW)
 	add_child(holder)
-	# Real baseColor/normal/emissive textures ship on the mesh now; duplicate
-	# the imported material per instance (so the damage flash only lights up
-	# the one that got hit) and tint it lightly so a wave isn't visibly clones.
+	# Duplicate the imported material per instance, so the damage flash only
+	# lights up the one that got hit, and tint it lightly so a wave isn't
+	# visibly clones.
 	var base_mat := mesh_inst.mesh.surface_get_material(0)
 	var mat: BaseMaterial3D = base_mat.duplicate() if base_mat != null else StandardMaterial3D.new()
 	var tint := Color(randf_range(0.82, 1.05), randf_range(0.82, 1.05), randf_range(0.82, 1.05))
 	mat.albedo_color = mat.albedo_color * tint
+	# The source model shipped with its colour map wired up as emission at full
+	# strength, which made the goblins glow in the dark instead of being lit by
+	# the moon; tools/prep_goblin.py strips that. But damage() flashes a hit by
+	# setting emission, and that does nothing unless the channel is switched on
+	# — so enable it here and leave the energy at zero until something connects.
+	mat.emission_enabled = true
+	mat.emission_energy_multiplier = 0.0
+	# Meshy exports this double-sided. Nothing here is a flat plane, so culling
+	# the back faces is free and halves what the rasteriser has to chew through
+	# on a screen full of them.
+	mat.cull_mode = BaseMaterial3D.CULL_BACK
 	mesh_inst.set_surface_override_material(0, mat)
 	_mats.append(mat)
 
@@ -1613,10 +1732,12 @@ func tick(delta: float) -> void:
 			var out := Vector3(position.x, 0, position.z).normalized()
 			_move(out, spd * 1.15, delta)
 			if carried != null and is_instance_valid(carried):
-				if _skel != null:
-					# slung from the one raised claw, hanging just beneath it
-					var rw: Vector3 = _skel.get_bone_global_pose(GOBLIN_BONE_R_WRIST).origin
-					carried.position = _skel.global_transform * rw - Vector3(0, GOBLIN_CARRY_DANGLE, 0)
+				if _skel != null and _carry_bone >= 0:
+					# Slung from the raised hand, hanging just beneath it. Read
+					# from the bone every frame rather than pinned once, so the
+					# bird rides the carry cycle instead of floating alongside.
+					var rw: Vector3 = _skel.get_bone_global_pose(_carry_bone).origin
+					carried.position = _skel.global_transform * rw - Vector3(0, GOBLIN_CARRY_DANGLE * body_scale, 0)
 				else:
 					carried.position = position + Vector3(0, 2.2 * body_scale, 0)
 			if Vector3(position.x, 0, position.z).length() > 70.0:
@@ -1689,12 +1810,10 @@ func tick(delta: float) -> void:
 			carried.state = "carried"
 			carried.visible = true
 			state = "carry"
-			if _skel != null:
-				# composed onto the rest rotation, like the walk — a bare
-				# axis-angle here would throw the shoulder's bind pose away.
-				# Right arm only; the left keeps swinging with the stride.
-				var lift := Quaternion(Vector3(1, 0, 0), deg_to_rad(GOBLIN_ARM_UP_SHOULDER_DEG))
-				_skel.set_bone_pose_rotation(GOBLIN_BONE_R_SHOULDER, _rest_rot(GOBLIN_BONE_R_SHOULDER) * lift)
+			# The stoop that picks the bird up, played once. It runs straight
+			# into the carry walk on the next tick, which holds one arm aloft —
+			# authored for an umbrella, but a hoisted chicken reads the same.
+			_play(GOBLIN_ANIM_GRAB, 1.0, true)
 			game.sfx.play("grab")
 			game.ui.whisper("IT HAS ONE OF YOUR CHICKENS")
 			return
@@ -1737,8 +1856,8 @@ func _move(dir: Vector3, speed: float, delta: float) -> void:
 func _walk(speed: float, delta: float) -> void:
 	if flying:
 		return
-	if _skel != null:
-		_walk_skel(speed, delta)
+	if _anim != null:
+		_play_gait(speed)
 		return
 	if _legs.is_empty():
 		return
@@ -1773,26 +1892,35 @@ func _walk(speed: float, delta: float) -> void:
 ## pointing down the limb — that swung the legs out sideways as much as
 ## forward. Pre-multiplying rotates about the parent's axes, where X is the
 ## character's own left/right, which is the hinge a stride actually turns on.
-func _walk_skel(speed: float, delta: float) -> void:
-	_stride += delta * speed * 3.4 / sqrt(maxf(body_scale, 0.3))
-	var swing := sin(_stride)
-	var hip := Quaternion(Vector3(1, 0, 0), swing * deg_to_rad(28.0))
-	var hip_i := Quaternion(Vector3(1, 0, 0), -swing * deg_to_rad(28.0))
-	_skel.set_bone_pose_rotation(GOBLIN_BONE_R_HIP, hip * _rest_rot(GOBLIN_BONE_R_HIP))
-	_skel.set_bone_pose_rotation(GOBLIN_BONE_L_HIP, hip_i * _rest_rot(GOBLIN_BONE_L_HIP))
-	# arms counter-swing against the leg on the same side. The right one is
-	# skipped while something is being carried — it is held up by the carry
-	# pose, and swinging it here would drop the bird to hip height every
-	# frame. The left swings either way, so a laden goblin still walks
-	# rather than glides.
-	var arm := Quaternion(Vector3(1, 0, 0), -swing * deg_to_rad(16.0))
-	var arm_i := Quaternion(Vector3(1, 0, 0), swing * deg_to_rad(16.0))
-	if carried == null:
-		_skel.set_bone_pose_rotation(GOBLIN_BONE_R_SHOULDER, arm * _rest_rot(GOBLIN_BONE_R_SHOULDER))
-	_skel.set_bone_pose_rotation(GOBLIN_BONE_L_SHOULDER, arm_i * _rest_rot(GOBLIN_BONE_L_SHOULDER))
-	# rises on each footfall (twice per cycle) and rolls onto the planted leg
-	position.y = (1.0 - cos(_stride * 2.0)) * 0.022 * body_scale
-	rotation.z = swing * 0.03
+## Ask for a clip. Idempotent: re-requesting whatever is already playing only
+## updates the speed, so this can be called every frame from the gait without
+## restarting the cycle and locking the goblin into frame zero forever.
+func _play(clip: String, speed := 1.0, restart := false) -> void:
+	if _anim == null or not _anim.has_animation(clip):
+		return
+	_anim.speed_scale = speed
+	if _clip == clip and not restart and _anim.is_playing():
+		return
+	_clip = clip
+	_anim.play(clip)
+
+## The animated gait. Playback is scaled by how fast the body is actually
+## moving, which is what keeps the feet from skating: a goblin at half speed
+## takes the same strides half as often rather than gliding through them.
+## Cadence still falls with size, for the same pendulum reason the procedural
+## walk used — a bigger creature's legs swing slower.
+func _play_gait(speed: float) -> void:
+	# A swing in progress outranks the gait. Without this the walk would reclaim
+	# the rig on the very next frame and the attack would never be seen, since
+	# _move() runs before the swipe every tick.
+	if _swipe_t > 0.0:
+		return
+	var running: bool = _chase_t > 0.0
+	var clip := GOBLIN_ANIM_RUN if running else GOBLIN_ANIM_WALK
+	if carried != null:
+		clip = GOBLIN_ANIM_CARRY
+	var rate: float = speed / GOBLIN_ANIM_REF_SPEED / sqrt(maxf(body_scale, 0.3))
+	_play(clip, clampf(rate, 0.35, 2.5))
 
 ## One raise-and-tear, out and back on a sine so it eases at both ends
 ## instead of snapping. Also leans the body into the blow and shoves it a
@@ -1812,22 +1940,27 @@ const CHASE_COOLDOWN := 7.0
 
 ## Throws the arms out. reach is 0 at rest and 1 at full extension.
 func _swipe_arms(reach: float) -> void:
-	if _skel != null:
-		# negative throws the arms forward past the head, claws leading;
-		# positive winds them up behind instead, which reads as a shrug
-		var q := Quaternion(Vector3(1, 0, 0), reach * deg_to_rad(-110.0))
-		_skel.set_bone_pose_rotation(GOBLIN_BONE_R_SHOULDER, q * _rest_rot(GOBLIN_BONE_R_SHOULDER))
-		_skel.set_bone_pose_rotation(GOBLIN_BONE_L_SHOULDER, q * _rest_rot(GOBLIN_BONE_L_SHOULDER))
-	else:
-		# these shoulders hang forward from a negative rest pitch, so driving
-		# rotation.x further negative is what reaches out rather than back
-		for i in _arms.size():
-			_arms[i].rotation.x = _arm_rest[i] - reach * deg_to_rad(70.0)
+	if _anim != null:
+		# an authored swing covers this; posing bones on top of a playing clip
+		# only fights it
+		return
+	# these shoulders hang forward from a negative rest pitch, so driving
+	# rotation.x further negative is what reaches out rather than back
+	for i in _arms.size():
+		_arms[i].rotation.x = _arm_rest[i] - reach * deg_to_rad(70.0)
 
 ## The standing version, used on the coop: the whole body commits, rising
 ## onto the blow with the walk's sideways roll dropped.
 func _swipe(delta: float) -> void:
 	_swipe_t = maxf(0.0, _swipe_t - delta * SWIPE_SPEED)
+	if _anim != null:
+		# The clip carries the whole swing, body included, so no procedural rise
+		# or lean goes on top of it. Weapon_Combo is a 3.7s multi-hit sequence
+		# and a swipe lasts about a third of a second, so it runs fast enough
+		# that one recognisable swing fits inside the window; tearing at the
+		# coop just keeps re-triggering it, which reads as the combo it is.
+		_play(GOBLIN_ANIM_ATTACK, GOBLIN_ATTACK_RATE, _swipe_t >= 1.0)
+		return
 	# 0 at rest, 1 at full extension, 0 again as the arms drop back
 	var reach := sin((1.0 - _swipe_t) * PI)
 	_swipe_arms(reach)
@@ -1838,12 +1971,39 @@ func _swipe(delta: float) -> void:
 ## stood in front of. The legs stay in their stride and only the arms are
 ## taken over — which is why this has to run after _move(), whose _walk()
 ## would otherwise put the arms straight back into the gait.
+## Killed. Falls over where it stood instead of popping out of existence, then
+## lies there and fades. Returns false when there is no rig to fall with — the
+## procedural bodies and the web build still vanish in a puff of feathers, and
+## main.remove_enemy frees them the old way.
+##
+## The corpse is already off the enemies list by the time this runs, so nothing
+## ticks it and it cannot keep hitting the coop while it dies.
+func begin_death() -> bool:
+	if _anim == null or _dying:
+		return false
+	_dying = true
+	var clip: String = GOBLIN_ANIM_DEATHS[randi() % GOBLIN_ANIM_DEATHS.size()]
+	if not _anim.has_animation(clip):
+		return false
+	_play(clip, 1.0, true)
+	var fall: float = _anim.get_animation(clip).length
+	var tw := create_tween()
+	tw.tween_interval(fall + GOBLIN_CORPSE_LINGER)
+	# fading the albedo alpha needs the material in a blend mode that has one
+	for m in _mats:
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	tw.tween_method(func(a: float):
+		for m in _mats:
+			m.albedo_color.a = a, 1.0, 0.0, GOBLIN_CORPSE_FADE)
+	tw.tween_callback(queue_free)
+	return true
+
 func _swipe_moving(delta: float) -> void:
 	_swipe_t = maxf(0.0, _swipe_t - delta * SWIPE_SPEED)
+	if _anim != null:
+		_play(GOBLIN_ANIM_ATTACK, GOBLIN_ATTACK_RATE, _swipe_t >= 1.0)
+		return
 	_swipe_arms(sin((1.0 - _swipe_t) * PI))
-
-func _rest_rot(bone: int) -> Quaternion:
-	return _skel.get_bone_rest(bone).basis.get_rotation_quaternion()
 
 func ignite() -> void:
 	if state == "burn":
