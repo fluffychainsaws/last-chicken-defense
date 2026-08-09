@@ -1,5 +1,8 @@
 # The goblin rig
 
+To work on this model in a live Blender rather than by rendering stills, set the
+bridge up first — see [blender-bridge.md](blender-bridge.md).
+
 Reference notes for `models/goblin.glb`. Written down because working any of it
 out again costs an afternoon of rendering candidates and parsing buffers.
 
