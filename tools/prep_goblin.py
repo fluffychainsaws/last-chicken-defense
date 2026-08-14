@@ -56,6 +56,80 @@ for mat in bpy.data.materials:
         bsdf.inputs["Roughness"].default_value = 0.68
     print("cleaned material: %s" % mat.name)
 
+def _action_fcurves(action):
+    """Blender 4.4 moved actions to slots and channelbags; 5.x has no
+    action.fcurves at all. Yield curves from whichever layout is present."""
+    if hasattr(action, "fcurves"):
+        for fc in action.fcurves:
+            yield fc
+        return
+    for layer in getattr(action, "layers", []):
+        for strip in getattr(layer, "strips", []):
+            for bag in getattr(strip, "channelbags", []):
+                for fc in bag.fcurves:
+                    yield fc
+
+
+def bake_armature_scale():
+    """Put the rig into metres.
+
+    Meshy exports this skeleton in centimetres — the hips rest 92 units up — and
+    leans on a 0.01 scale on the armature node to bring the result back to human
+    size. Godot imports that faithfully, which is fine until you attach physics:
+    the physics server works in global space, so bodies parented under a hundredth
+    scale get shapes, masses and impulses in mutually inconsistent units, and a
+    ragdoll built that way falls through the floor and accelerates away instead of
+    settling. Measured: hips at y=-259 after ninety frames, still speeding up.
+
+    So the scale is applied here rather than carried at runtime: bone rests, mesh
+    vertices and every animated bone translation are multiplied through, and the
+    node is left at 1. Nothing about the model changes shape — it is the same
+    1.7 m goblin — it is simply described in the units the engine expects.
+    """
+    arm = next((o for o in bpy.data.objects if o.type == "ARMATURE"), None)
+    if arm is None:
+        return
+    s = float(arm.scale.x)
+    if abs(s - 1.0) < 1e-6:
+        print("armature already at unit scale, nothing to bake")
+        return
+    if abs(arm.scale.y - s) > 1e-6 or abs(arm.scale.z - s) > 1e-6:
+        raise SystemExit("armature scale is not uniform (%s); bailing rather than shearing it" % (tuple(arm.scale),))
+    print("baking armature scale %.5f into the rig" % s)
+
+    # meshes ride under the armature, so their vertices are in the same units
+    for ob in bpy.data.objects:
+        if ob.type != "MESH":
+            continue
+        for v in ob.data.vertices:
+            v.co *= s
+
+    # bone rests
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode="EDIT")
+    for eb in arm.data.edit_bones:
+        eb.head = eb.head * s
+        eb.tail = eb.tail * s
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    # and every animated bone translation, which is expressed in those same units
+    scaled = 0
+    for action in bpy.data.actions:
+        for fc in _action_fcurves(action):
+            if not fc.data_path.endswith(".location"):
+                continue
+            for kp in fc.keyframe_points:
+                kp.co.y *= s
+                kp.handle_left.y *= s
+                kp.handle_right.y *= s
+            scaled += 1
+    print("  scaled %d bone location curves across %d actions" % (scaled, len(bpy.data.actions)))
+
+    arm.scale = (1.0, 1.0, 1.0)
+
+
+bake_armature_scale()
+
 bpy.ops.export_scene.gltf(
     filepath=OUT,
     export_format="GLB",
