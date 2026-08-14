@@ -46,9 +46,22 @@ depends on that, and a re-export that reorders the bones still works.
 `GOBLIN_MODEL_YAW` stays 0), and the mesh is exactly **1.7** tall, which is what
 `GOBLIN_MODEL_HEIGHT` encodes.
 
-**The skeleton is in centimetres.** The Hips rest origin sits at y≈92, and a
-scale on the parent node brings it down to metres. This matters if you ever add
-physics bodies to it: Godot's rigid bodies misbehave under scaled parents.
+**The skeleton is in centimetres** as Meshy exports it — the Hips rest origin
+sits at y≈92 — so `tools/prep_goblin.py` bakes that hundredth into the rests,
+the vertices and every location key before the file is committed. What ships is
+in metres with no scale anywhere on the armature node.
+
+That matters because of the one scale that is left. Each goblin gets its own
+size from a `Node3D` above the model, and Godot's ragdoll cannot live under it:
+a simulated bone's pose is derived from its body's *global* transform, so the
+skeleton's world scale is divided back out every physics tick, and the round
+trip does not land where it started — the error compounds and the corpse grows
+until it fills the screen. `enemy.gd::_bake_model_scale()` moves that size down
+into the skeleton at the moment of death (bone rests out, bind poses scaled,
+holder back to 1) so the body keeps the size it had and nothing between the
+bones and the world is scaled any more. It cannot run any earlier than that: the
+animation clips are written in the pre-bake units and would all need scaling
+too, which is exactly the work `prep_goblin.py` does offline.
 
 ## Mesh
 

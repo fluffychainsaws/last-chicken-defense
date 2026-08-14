@@ -2090,24 +2090,55 @@ const RAGDOLL_BONES := [
 	"RightUpLeg", "RightLeg", "RightFoot",
 ]
 
+## Moves the goblin's size from the node above the skeleton into the skeleton
+## itself, so nothing between the bones and the world is scaled any more.
+##
+## Every goblin is one shared 1.7 m mesh with a Node3D above it scaled to the
+## size that individual wants to be. That is fine while it is animating and
+## fatal once it is not: Godot drives a ragdolled bone's pose from its body's
+## GLOBAL transform, dividing the skeleton's world scale back out every physics
+## tick, and the round trip does not come back where it started. The error
+## compounds, and a corpse grows until it fills the screen.
+##
+## Zeroing that scale stops the growth but hands every body back the mesh's
+## native 1.7 m, so a small goblin still swells by a third the moment it dies.
+## Baking is the version that keeps the size it had:
+##
+##   * bone rests keep their rotation and move their origins out by the scale,
+##     which stretches the skeleton without tilting a single joint;
+##   * the skin's bind poses take the same scale whole, which is what carries
+##     the change through to the vertices — the mesh data is untouched and
+##     stays shared, only this instance's Skin is a copy.
+##
+## Animation tracks are written in the old bone-local units and would all need
+## scaling too, which is why this cannot happen at spawn — but a corpse has
+## stopped animating, so at the moment of death there is nothing left to break.
+func _bake_model_scale() -> void:
+	if _model_holder == null or _skel == null:
+		return
+	var ms: float = _model_holder.scale.x
+	if is_equal_approx(ms, 1.0):
+		return
+	_model_holder.scale = Vector3.ONE
+	for i in _skel.get_bone_count():
+		var rest := _skel.get_bone_rest(i)
+		_skel.set_bone_rest(i, Transform3D(rest.basis, rest.origin * ms))
+		_skel.set_bone_pose_position(i, _skel.get_bone_pose_position(i) * ms)
+	for mi in _mesh_children(_model_holder):
+		if mi.skin == null:
+			continue
+		var skin: Skin = mi.skin.duplicate()
+		for b in skin.get_bind_count():
+			var bind := skin.get_bind_pose(b)
+			skin.set_bind_pose(b, Transform3D(bind.basis.scaled(Vector3.ONE * ms), bind.origin * ms))
+		mi.skin = skin
+
 ## Builds the physics bodies and hands the skeleton over. Returns false if the
 ## rig is missing, in which case the caller falls back to an authored clip.
 func _start_ragdoll() -> bool:
 	if _skel == null:
 		return false
-	# Godot drives the skeleton's bone poses from the bodies' GLOBAL transforms,
-	# so any scale between the skeleton and the world is divided back out of
-	# every pose, every frame — and the corpse inflates without limit until it
-	# fills the screen. The model is scaled to size the goblin, so that scale has
-	# to come off before physics takes over.
-	#
-	# The body therefore snaps to the mesh's native 1.7 m as it dies. On a
-	# standard goblin that is a jump of about a tenth, inside a violent collapse,
-	# which is a cheap price for corpses that stay the size of corpses.
-	if _model_holder != null and not is_equal_approx(_model_holder.scale.x, 1.0):
-		var was: float = _model_holder.scale.x
-		_model_holder.scale = Vector3.ONE
-		_model_holder.position.y *= 1.0 / maxf(was, 0.01)
+	_bake_model_scale()
 	var by_bone := {}
 	for bname in RAGDOLL_BONES:
 		var b := _skel.find_bone(bname)
