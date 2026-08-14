@@ -911,12 +911,38 @@ func _start_dawn() -> void:
 
 # ---------------- spawning / combat ----------------
 
+## The opening wave is paced to arrive over the first half of the night. Once it
+## was spent the yard went quiet, which on a 115 second night left most of the
+## small hours with nothing in it — you had won by four in the morning and then
+## stood around waiting for the sun. So stragglers keep coming after the wave,
+## right up until the light does.
+##
+## They stop just short of dawn so the last few can be cleared, rather than the
+## night ending with fresh arrivals still walking out of the treeline.
+const REINFORCE_UNTIL := 0.94
+## Seconds between stragglers on night one, before the per-day squeeze below.
+const REINFORCE_GAP := 5.0
+## Concurrent enemies. The goblins are 15k triangles each and the frame rate is
+## what stops being fun first, so this is a performance ceiling rather than a
+## balance one.
+const MAX_ALIVE := 22
+
+## Stragglers arrive faster as the days get harder, but never faster than one
+## every second and a half — past that a night stops being a siege and becomes a
+## wall you cannot get out from under.
+func _reinforce_gap() -> float:
+	return maxf(1.5, REINFORCE_GAP - 0.2 * float(day_num - 1))
+
 func _update_spawning(delta: float) -> void:
-	if _spawn_left <= 0:
-		return
 	_spawn_timer -= delta
 	if _spawn_timer > 0.0:
 		return
+	if _spawn_left <= 0:
+		# past the opening wave: keep them coming until the sun does
+		if phase_t >= REINFORCE_UNTIL or enemies.size() >= MAX_ALIVE:
+			_spawn_timer = 0.5
+			return
+		_spawn_left = 1
 	var boss: bool = night_theme.get("boss", false)
 	var is_escort := boss and _spawned_boss
 	var e = EnemyScript.new()
@@ -929,8 +955,12 @@ func _update_spawning(delta: float) -> void:
 	if boss:
 		_spawned_boss = true
 	_spawn_left -= 1
-	var count_total := maxi(_spawn_left + enemies.size(), 1)
-	_spawn_timer = 1.0 if _test_mode else NIGHT_LEN * 0.5 / float(count_total)
+	if _spawn_left > 0:
+		# still delivering the opening wave, paced across the first half
+		var count_total := maxi(_spawn_left + enemies.size(), 1)
+		_spawn_timer = 1.0 if _test_mode else NIGHT_LEN * 0.5 / float(count_total)
+	else:
+		_spawn_timer = 1.0 if _test_mode else _reinforce_gap()
 
 func remove_enemy(e: Node3D, give_bounty: bool) -> void:
 	if not enemies.has(e):
