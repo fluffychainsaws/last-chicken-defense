@@ -832,6 +832,7 @@ func _process(delta: float) -> void:
 	_update_customers(delta)
 	_update_particles(delta)
 	_update_pickups()
+	_update_corpses(delta)
 	_update_mirror()
 	if is_night:
 		_update_spawning(delta)
@@ -1279,6 +1280,102 @@ func spawn_poof(pos: Vector3, color: Color, n: int) -> void:
 		add_child(m)
 		var vel := Vector3(randf_range(-2, 2), randf_range(1, 4), randf_range(-2, 2))
 		particles.append({"node": m, "vel": vel, "life": 0.6, "max_life": 0.6})
+
+# ---------------- corpses ----------------
+
+## How many bodies the yard will hold. Past this the oldest fades out: they sleep
+## once settled so a field of them is nearly free to render, but fourteen rigid
+## bodies apiece adds up and a long night can produce dozens.
+const MAX_CORPSES := 14
+## Walk into a body and it moves. Below this speed you are stepping over it
+## rather than kicking it, so it stays put.
+const KICK_SPEED := 2.2
+const KICK_FORCE := 3.4
+## How close the player has to be for a boot to connect.
+const KICK_REACH := 1.3
+
+var corpses: Array = []
+## The body currently over the player's shoulder, if any.
+var carried_corpse = null
+
+func add_corpse(e: Node3D) -> void:
+	corpses.append(e)
+	while corpses.size() > MAX_CORPSES:
+		var oldest = corpses.pop_front()
+		if is_instance_valid(oldest) and oldest != carried_corpse:
+			oldest.dispose_corpse()
+
+func forget_corpse(e: Node3D) -> void:
+	corpses.erase(e)
+	if carried_corpse == e:
+		carried_corpse = null
+
+func nearest_corpse(from: Vector3, radius: float):
+	var best = null
+	var best_d := radius
+	for c in corpses:
+		if not is_instance_valid(c) or c.carried_by_player:
+			continue
+		var d: float = from.distance_to(c.global_position)
+		if d < best_d:
+			best = c
+			best_d = d
+	return best
+
+## Boots whatever you walk into, and keeps a carried body in front of you.
+func _update_corpses(delta: float) -> void:
+	var moving: bool = player.velocity.length() > KICK_SPEED
+	for c in corpses.duplicate():
+		if not is_instance_valid(c):
+			corpses.erase(c)
+			continue
+		if c.carried_by_player:
+			continue
+		if moving and player.position.distance_to(c.global_position) < KICK_REACH + 1.0:
+			c.kick(player.global_position, KICK_FORCE * player.velocity.length() / KICK_SPEED)
+	if carried_corpse != null and is_instance_valid(carried_corpse):
+		# slung over the shoulder: out in front, turned across the body, and
+		# swaying a little with the walk so it does not read as welded on
+		var fwd: Vector3 = -player.global_transform.basis.z
+		var sway: float = sin(Time.get_ticks_msec() * 0.004) * 0.05
+		carried_corpse.global_position = player.global_position + fwd * 0.9 + Vector3(0, 1.15 + sway, 0)
+		carried_corpse.rotation = Vector3(0.0, player.rotation.y, deg_to_rad(78.0))
+	elif carried_corpse != null:
+		carried_corpse = null
+
+## Returns false when there is nothing to pick up or hands are already full.
+func pick_up_corpse(c) -> bool:
+	if c == null or carried_corpse != null or not is_instance_valid(c):
+		return false
+	carried_corpse = c
+	c.carried_by_player = true
+	c.hold_still()
+	sfx.play("grab")
+	return true
+
+## Puts it down where you stand, thrown gently forward so it does not land inside
+## your own feet.
+func drop_corpse() -> void:
+	if carried_corpse == null:
+		return
+	var c = carried_corpse
+	carried_corpse = null
+	if not is_instance_valid(c):
+		return
+	c.carried_by_player = false
+	var fwd: Vector3 = -player.global_transform.basis.z
+	c.let_go(fwd * 1.8 + Vector3(0, 0.4, 0))
+
+## Eaten by a machine. The body is gone but the caller decides what came out.
+func consume_carried_corpse() -> bool:
+	if carried_corpse == null or not is_instance_valid(carried_corpse):
+		return false
+	var c = carried_corpse
+	carried_corpse = null
+	c.carried_by_player = false
+	corpses.erase(c)
+	c.dispose_corpse()
+	return true
 
 func _update_pickups() -> void:
 	for egg_mesh in egg_pickups.duplicate():

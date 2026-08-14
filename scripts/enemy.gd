@@ -122,6 +122,12 @@ var _carry_bone := -1
 ## Set once the corpse is falling, so a second hit landing in the same frame
 ## cannot start the death over and leave the body twitching.
 var _dying := false
+## A body lying in the yard, worth picking up. Only ragdolled deaths become one;
+## the animated falls still fade away, since there is nothing physical left to
+## kick or carry once the clip has finished.
+var is_corpse := false
+## True while the player is carrying it, so nothing else claims it mid-lift.
+var carried_by_player := false
 
 func setup(g: Node3D, night: int, thm: Dictionary, escort := false) -> void:
 	game = g
@@ -1982,8 +1988,9 @@ func begin_death() -> bool:
 	if _anim == null or _dying:
 		return false
 	_dying = true
+	var ragdolled: bool = ragdoll_deaths and _start_ragdoll()
 	var fall := 0.0
-	if ragdoll_deaths and _start_ragdoll():
+	if ragdolled:
 		# physics decides how long the fall takes, so it gets a fixed budget
 		fall = 2.4
 	else:
@@ -1992,6 +1999,15 @@ func begin_death() -> bool:
 			return false
 		_play(clip, 1.0, true)
 		fall = _anim.get_animation(clip).length
+	# A ragdolled body is left where it lands: it is worth something now — the
+	# blender turns it into compost and the smoothie maker into stock — so it
+	# stays until it is dealt with or the yard runs out of room for corpses.
+	# The bodies fall asleep on their own once they stop moving, so a field of
+	# them costs almost nothing to leave lying about.
+	if ragdolled:
+		is_corpse = true
+		game.add_corpse(self)
+		return true
 	var tw := create_tween()
 	tw.tween_interval(fall + GOBLIN_CORPSE_LINGER)
 	# fading the albedo alpha needs the material in a blend mode that has one
@@ -2003,9 +2019,58 @@ func begin_death() -> bool:
 	tw.tween_callback(queue_free)
 	return true
 
-## Toggle in game with the K key, so this can be held against the authored falls
-## inside one night rather than from memory.
-static var ragdoll_deaths := false
+## Fades and frees a corpse that has outlived its welcome — either the yard hit
+## its limit or something consumed it. Kept separate from begin_death so the
+## machines can dispose of a body without pretending to kill it again.
+func dispose_corpse() -> void:
+	is_corpse = false
+	for m in _mats:
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var tw := create_tween()
+	tw.tween_method(func(a: float):
+		for m in _mats:
+			m.albedo_color.a = a, 1.0, 0.0, GOBLIN_CORPSE_FADE)
+	tw.tween_callback(queue_free)
+
+## Boot it. Every body in range of the blow takes the push, so a kick to the legs
+## sends the legs and the rest follows through the joints, rather than the whole
+## corpse sliding off as one rigid lump.
+func kick(from: Vector3, force: float) -> void:
+	if _skel == null:
+		return
+	for c in _skel.get_children():
+		if not (c is PhysicalBone3D):
+			continue
+		var d: Vector3 = c.global_position - from
+		if d.length() > 1.4:
+			continue
+		var dir: Vector3 = Vector3(d.x, 0, d.z).normalized() + Vector3.UP * 0.45
+		c.apply_central_impulse(dir * force)
+
+## Picked up. Physics hands the skeleton back to the animation system, which is
+## holding the last pose the death clip left it in — limp enough to read as a
+## body being carried, and far cheaper than dragging fourteen live rigid bodies
+## around behind the player.
+func hold_still() -> void:
+	if _skel != null:
+		_skel.physical_bones_stop_simulation()
+
+## Dropped, or thrown. Back to physics from wherever it is now.
+func let_go(impulse: Vector3) -> void:
+	if _skel == null:
+		return
+	_skel.physical_bones_start_simulation()
+	if impulse.length() > 0.01:
+		for c in _skel.get_children():
+			if c is PhysicalBone3D and c.bone_name == "Spine01":
+				c.apply_central_impulse(impulse)
+				return
+
+## On by default now, because the bodies are worth something: the blender turns
+## them into compost and the smoothie maker into stock, and none of that works on
+## an animated fall that fades out. K still flips back to the authored clips for
+## comparison, but that path leaves nothing behind to pick up.
+static var ragdoll_deaths := true
 
 ## Fourteen bodies, not one per bone. The first attempt gave all twenty-two a
 ## capsule and the result never came to rest: adjacent limbs overlap at every

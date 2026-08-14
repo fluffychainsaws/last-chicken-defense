@@ -278,9 +278,18 @@ func _interact_scan() -> void:
 		# walking past it opened the Roost
 		ctx = "roost"
 		prompt = "[E]  THE ROOST  (train the flock)"
+	elif game.carried_corpse != null:
+		# hands full: the only thing E does is put it down, unless you are
+		# standing at a machine that wants it — those are checked further up
+		ctx = "drop_body"
+		prompt = "[E]  PUT THE BODY DOWN"
 	else:
+		var body = game.nearest_corpse(position, 2.2)
 		var c = game.nearest_chicken(position, 2.8)
-		if c != null:
+		if body != null and c == null:
+			ctx = "lift_body"
+			prompt = "[E]  PICK UP THE BODY"
+		elif c != null:
 			if game.is_day():
 				ctx = "chicken"
 				prompt = ("[E]  RECALL FORAGER" if c.forager else "[E]  SEND TO FORAGE")
@@ -314,6 +323,11 @@ func _interact_scan() -> void:
 					game.sfx.play("denied")
 				else:
 					game.sleep_until_night()
+			"lift_body":
+				if not game.pick_up_corpse(game.nearest_corpse(position, 2.2)):
+					game.sfx.play("denied")
+			"drop_body":
+				game.drop_corpse()
 			"chicken":
 				var c = game.nearest_chicken(position, 2.8)
 				if c != null:
