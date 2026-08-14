@@ -2150,6 +2150,57 @@ func hold_corpse_scale() -> void:
 		return
 	_model_holder.scale /= gs
 
+## How far a limb is allowed to get from the hips before the body is declared
+## broken. A goblin is under two metres with its arms out, so three is already
+## generous — nothing healthy reaches it.
+const CORPSE_MAX_REACH := 3.0
+
+## Catches a ragdoll that has come apart and puts it out of its misery.
+##
+## A jointed body that ends up fighting a constraint it cannot satisfy does not
+## fail quietly: the solver pumps energy in, the limbs walk away from each other,
+## and because the mesh is skinned between them it smears out across the yard —
+## twitching, the size of the paddock, and solid enough to throw the farmer into
+## the air. One bad corpse is worse than no ragdoll at all.
+##
+## So the spread gets measured every frame, and a body that has come apart stops
+## being a physics object: simulation off, and the skeleton left holding the last
+## pose it had. It still counts as a corpse — it can be carried, blended and
+## sold like any other — it just stops flailing.
+func check_corpse_intact() -> void:
+	if _skel == null or _corpse_broken:
+		return
+	var hips: PhysicalBone3D = null
+	var limbs: Array[PhysicalBone3D] = []
+	for c in _skel.get_children():
+		if c is PhysicalBone3D:
+			limbs.append(c)
+			if c.bone_name == "Hips":
+				hips = c
+	if hips == null or limbs.is_empty():
+		return
+	var origin: Vector3 = hips.global_position
+	var broken := false
+	if not _finite(origin):
+		broken = true
+	else:
+		for l in limbs:
+			var p: Vector3 = l.global_position
+			if not _finite(p) or p.distance_to(origin) > CORPSE_MAX_REACH:
+				broken = true
+				break
+	if not broken:
+		return
+	_corpse_broken = true
+	_skel.physical_bones_stop_simulation()
+	for l in limbs:
+		l.queue_free()
+
+var _corpse_broken := false
+
+func _finite(v: Vector3) -> bool:
+	return is_finite(v.x) and is_finite(v.y) and is_finite(v.z)
+
 ## Builds the physics bodies and hands the skeleton over. Returns false if the
 ## rig is missing, in which case the caller falls back to an authored clip.
 func _start_ragdoll() -> bool:
@@ -2199,7 +2250,15 @@ func _start_ragdoll() -> bool:
 		# the transform it finds at that moment; set this afterwards and every
 		# joint is pinned against an identity transform, which tears the corpse
 		# across seven metres the instant it is simulated.
-		pb.transform = _skel.get_bone_global_rest(b)
+		#
+		# And it stands at rest TIMES the offset, not at the rest. Godot reads a
+		# bone's pose back off its body as `body * body_offset⁻¹`, so a body
+		# parked on the bone itself puts the bone half a limb behind where it
+		# belongs — every one of the fourteen, in a different direction. The
+		# joints then anchor to those wrong places and spend the corpse's whole
+		# life pulling against a constraint that cannot be met, which is what
+		# the smearing and the twitching were.
+		pb.transform = _skel.get_bone_global_rest(b) * pb.body_offset
 		_skel.add_child(pb)
 		by_bone[b] = pb
 	if by_bone.is_empty():
