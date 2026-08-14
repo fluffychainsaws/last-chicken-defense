@@ -1982,11 +1982,16 @@ func begin_death() -> bool:
 	if _anim == null or _dying:
 		return false
 	_dying = true
-	var clip: String = GOBLIN_ANIM_DEATHS[randi() % GOBLIN_ANIM_DEATHS.size()]
-	if not _anim.has_animation(clip):
-		return false
-	_play(clip, 1.0, true)
-	var fall: float = _anim.get_animation(clip).length
+	var fall := 0.0
+	if ragdoll_deaths and _start_ragdoll():
+		# physics decides how long the fall takes, so it gets a fixed budget
+		fall = 2.4
+	else:
+		var clip: String = GOBLIN_ANIM_DEATHS[randi() % GOBLIN_ANIM_DEATHS.size()]
+		if not _anim.has_animation(clip):
+			return false
+		_play(clip, 1.0, true)
+		fall = _anim.get_animation(clip).length
 	var tw := create_tween()
 	tw.tween_interval(fall + GOBLIN_CORPSE_LINGER)
 	# fading the albedo alpha needs the material in a blend mode that has one
@@ -1997,6 +2002,107 @@ func begin_death() -> bool:
 			m.albedo_color.a = a, 1.0, 0.0, GOBLIN_CORPSE_FADE)
 	tw.tween_callback(queue_free)
 	return true
+
+## Toggle in game with the K key, so this can be held against the authored falls
+## inside one night rather than from memory.
+static var ragdoll_deaths := false
+
+## Fourteen bodies, not one per bone. The first attempt gave all twenty-two a
+## capsule and the result never came to rest: adjacent limbs overlap at every
+## joint, nothing exempts jointed bodies from colliding in Godot, and the
+## overlaps shove each other apart forever. Shoulders, hands, toes and the neck
+## are the worst of it — small, buried inside their neighbours, and contributing
+## nothing you can see. Godot walks up the bone chain to find each body's parent,
+## so skipping the ones between is supported and costs nothing.
+const RAGDOLL_BONES := [
+	"Hips", "Spine01", "Spine", "Head",
+	"LeftArm", "LeftForeArm", "RightArm", "RightForeArm",
+	"LeftUpLeg", "LeftLeg", "LeftFoot",
+	"RightUpLeg", "RightLeg", "RightFoot",
+]
+
+## Builds the physics bodies and hands the skeleton over. Returns false if the
+## rig is missing, in which case the caller falls back to an authored clip.
+func _start_ragdoll() -> bool:
+	if _skel == null:
+		return false
+	var by_bone := {}
+	for bname in RAGDOLL_BONES:
+		var b := _skel.find_bone(bname)
+		if b < 0:
+			continue
+		# a bone's reach is where its first child sits, since a child's rest
+		# origin is already expressed in the parent's space
+		var child := -1
+		for c in _skel.get_bone_count():
+			if _skel.get_bone_parent(c) == b:
+				child = c
+				break
+		var dir: Vector3 = _skel.get_bone_rest(child).origin if child >= 0 else Vector3(0, 0.12, 0)
+		var length: float = clampf(dir.length(), 0.08, 0.5)
+		var pb := PhysicalBone3D.new()
+		pb.bone_name = bname
+		var cs := CollisionShape3D.new()
+		var cap := CapsuleShape3D.new()
+		# thin enough that neighbours barely touch. Fat capsules were half the
+		# reason the old one boiled: every joint was a permanent overlap.
+		cap.radius = clampf(length * 0.18, 0.03, 0.09)
+		cap.height = maxf(length, cap.radius * 2.05)
+		cs.shape = cap
+		pb.add_child(cs)
+		# Godot's capsules stand along local Y, so turn that onto the bone and
+		# slide the shape halfway down it — a limb's mass runs along its length
+		# rather than bunching at the joint.
+		var axis: Vector3 = dir.normalized()
+		var basis := Basis()
+		var dot: float = clampf(Vector3.UP.dot(axis), -1.0, 1.0)
+		if dot < 0.999:
+			var cross: Vector3 = Vector3.UP.cross(axis)
+			if cross.length() > 0.0001:
+				basis = Basis(cross.normalized(), acos(dot))
+		pb.body_offset = Transform3D(basis, dir * 0.5)
+		pb.joint_type = PhysicalBone3D.JOINT_TYPE_CONE
+		pb.friction = 0.8
+		pb.bounce = 0.0
+		# Stand it where its bone actually is, BEFORE it enters the tree. Godot
+		# builds the joint to the parent body on the way in, anchoring it from
+		# the transform it finds at that moment; set this afterwards and every
+		# joint is pinned against an identity transform, which tears the corpse
+		# across seven metres the instant it is simulated.
+		pb.transform = _skel.get_bone_global_rest(b)
+		_skel.add_child(pb)
+		by_bone[b] = pb
+	if by_bone.is_empty():
+		return false
+	# Stop each body colliding with the one it hangs off. They necessarily
+	# overlap at the joint, and without this they spend the whole corpse's life
+	# trying to push out of each other.
+	for b in by_bone:
+		var parent := _skel.get_bone_parent(b)
+		while parent >= 0 and not by_bone.has(parent):
+			parent = _skel.get_bone_parent(parent)
+		if parent >= 0:
+			by_bone[b].add_collision_exception_with(by_bone[parent])
+			by_bone[parent].add_collision_exception_with(by_bone[b])
+	_anim.stop()
+	# the bodies have to be in the tree before the skeleton will hand over, so
+	# this waits a frame rather than starting on the one they were made
+	_skel.call_deferred("physical_bones_start_simulation")
+	call_deferred("_shove_ragdoll")
+	return true
+
+## A push in the direction it was already facing, so a shot goblin folds forward
+## rather than dropping like a marionette with its strings cut. Into the chest
+## alone: spread across every body it multiplies by fourteen and fires the whole
+## corpse into the air.
+func _shove_ragdoll() -> void:
+	if _skel == null:
+		return
+	var away := Vector3(sin(rotation.y), 0.1, cos(rotation.y)) * 1.4 * body_scale
+	for c in _skel.get_children():
+		if c is PhysicalBone3D and c.bone_name == "Spine01":
+			c.apply_central_impulse(away)
+			return
 
 func _swipe_moving(delta: float) -> void:
 	_swipe_t = maxf(0.0, _swipe_t - delta * SWIPE_SPEED)

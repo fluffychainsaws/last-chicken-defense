@@ -801,6 +801,11 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.physical_keycode == KEY_N and started and not paused and not over and not is_night:
 			phase_t = 1.0  # debug: skip to night
+		if event.physical_keycode == KEY_K and started and not over:
+			# debug: flip between the authored death falls and physics ragdoll,
+			# so the two can be compared inside one night instead of by memory
+			EnemyScript.ragdoll_deaths = not EnemyScript.ragdoll_deaths
+			ui.whisper("deaths: %s" % ("RAGDOLL" if EnemyScript.ragdoll_deaths else "animated falls"))
 
 func _process(delta: float) -> void:
 	if not started or over:
