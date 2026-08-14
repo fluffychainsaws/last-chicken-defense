@@ -278,9 +278,14 @@ func _interact_scan() -> void:
 		# walking past it opened the Roost
 		ctx = "roost"
 		prompt = "[E]  THE ROOST  (train the flock)"
+	elif game.carried_corpse != null and position.distance_to(game.blender_pos) < 2.6:
+		ctx = "grind"
+		prompt = "[E]  FEED IT TO THE GRINDER   (+%d compost)" % game.COMPOST_PER_BODY
+	elif game.carried_corpse != null and game.upgrades.smoothie and position.distance_to(game.smoothie_pos) < 2.4:
+		ctx = "blend"
+		prompt = "[E]  INTO THE BLENDER   (+%d smoothies)" % game.SMOOTHIE_PER_BODY
 	elif game.carried_corpse != null:
-		# hands full: the only thing E does is put it down, unless you are
-		# standing at a machine that wants it — those are checked further up
+		# hands full and nowhere to put it: E just sets it down
 		ctx = "drop_body"
 		prompt = "[E]  PUT THE BODY DOWN"
 	else:

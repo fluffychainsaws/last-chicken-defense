@@ -86,7 +86,7 @@ var day_num := 1
 var player_gender := "male"
 var is_night := false
 var phase_t := 0.0
-var upgrades := {"fence": 0, "coop": 0, "helmets": false, "turret": false, "rooster": false, "shotgun": false, "shoes": false}
+var upgrades := {"fence": 0, "coop": 0, "helmets": false, "turret": false, "rooster": false, "shotgun": false, "shoes": false, "smoothie": false}
 var coop_hp := 300.0
 var coop_broken := false
 var night_theme := {}
@@ -113,6 +113,11 @@ var _stand_root: Node3D = null
 ## Eggs left out on the counter. Sold unattended, so this is the only thing
 ## standing between a passer-by and an empty stand.
 var stand_eggs := 0
+## Smoothies put out for sale alongside the eggs. Worth more than twice an egg,
+## which is the point of hauling bodies indoors, but not so much that the flock
+## stops mattering — this is still Last Chicken Defense.
+var stand_smoothies := 0
+const STAND_SMOOTHIE_PRICE := 25
 var customers: Array = []
 var _customer_t := 12.0
 ## The stand pays better than shipping to the market over the computer —
@@ -311,6 +316,7 @@ func _build_world() -> void:
 	_build_coop()
 	_build_kiosk()
 	_build_farm_stand()
+	_build_garden()
 	_build_perimeter_fence()
 	_build_forest()
 	_build_grass()
@@ -1281,6 +1287,106 @@ func spawn_poof(pos: Vector3, color: Color, n: int) -> void:
 		var vel := Vector3(randf_range(-2, 2), randf_range(1, 4), randf_range(-2, 2))
 		particles.append({"node": m, "vel": vel, "life": 0.6, "max_life": 0.6})
 
+# ---------------- what the bodies are worth ----------------
+
+## The plot the compost is for. Nothing grows here yet — the beds are tilled and
+## waiting — but the machines that feed them need somewhere to stand, and a heap
+## of compost with no visible destination reads as a number with no meaning.
+var garden_pos := Vector3(-12.0, 0.0, 6.5)
+## Grinds bodies into something the soil wants. Outdoors, beside the beds,
+## because of what it does.
+var blender_pos := Vector3(-8.6, 0.0, 6.5)
+## Where the ground stuff ends up.
+var compost_pos := Vector3(-8.6, 0.0, 8.8)
+## Bought from the market, and then it is on the kitchen table.
+var smoothie_pos := Vector3(-17.6, 0.0, -8.6)
+
+## One body makes this much of each. The blender is the cheap, always-available
+## route; the smoothie maker costs money up front and turns the same body into
+## something the lane will pay for.
+const COMPOST_PER_BODY := 3
+const SMOOTHIE_PER_BODY := 2
+
+var compost := 0
+var smoothies := 0
+var _smoothie_node: Node3D = null
+
+## Tilled beds, a grinder and a bin. Built once at startup; the smoothie maker is
+## separate because it does not exist until it is bought.
+func _build_garden() -> void:
+	var soil_m := MK.tex_mat(Color(0.34, 0.24, 0.16), _ground_tex, 3.0, 1.0, _ground_norm)
+	for i in 3:
+		var bed := garden_pos + Vector3(0, 0, float(i - 1) * 1.9)
+		MK.box(self, Vector3(3.6, 0.12, 1.4), Color.WHITE, bed + Vector3(0, 0.06, 0)).material_override = soil_m
+		# a low frame round each bed so it reads as tended rather than as a
+		# patch where the grass died
+		for sx in [-1.0, 1.0]:
+			MK.box(self, Vector3(0.1, 0.18, 1.5), Color(0.5, 0.38, 0.24), bed + Vector3(sx * 1.8, 0.09, 0))
+		for sz in [-1.0, 1.0]:
+			MK.box(self, Vector3(3.7, 0.18, 0.1), Color(0.5, 0.38, 0.24), bed + Vector3(0, 0.09, sz * 0.75))
+
+	# the grinder: a hopper you drop a body into, a motor housing, an outfeed
+	var steel := MK.mat(Color(0.55, 0.57, 0.6))
+	steel.metallic = 0.7
+	steel.roughness = 0.35
+	var rust := MK.mat(Color(0.5, 0.32, 0.22))
+	MK.static_box(self, Vector3(1.5, 1.5, 1.5), blender_pos + Vector3(0, 0.75, 0))
+	MK.box(self, Vector3(1.4, 1.1, 1.4), Color.WHITE, blender_pos + Vector3(0, 0.55, 0)).material_override = steel
+	# hopper, wider at the top so it reads as something you tip things into
+	MK.box(self, Vector3(1.7, 0.5, 1.7), Color.WHITE, blender_pos + Vector3(0, 1.35, 0)).material_override = rust
+	MK.box(self, Vector3(1.3, 0.1, 1.3), Color(0.12, 0.1, 0.1), blender_pos + Vector3(0, 1.58, 0))
+	MK.cyl(self, 0.16, 0.16, 0.9, Color(0.3, 0.3, 0.33), blender_pos + Vector3(0.9, 0.5, 0.55)).rotation.z = deg_to_rad(90)
+	var chute := MK.box(self, Vector3(0.5, 0.4, 0.8), Color.WHITE, blender_pos + Vector3(0, 0.5, 1.1))
+	chute.material_override = steel
+	chute.rotation.x = deg_to_rad(-18)
+
+	# the bin it spits into
+	var bin_m := MK.mat(Color(0.28, 0.34, 0.24))
+	MK.static_box(self, Vector3(1.6, 1.1, 1.6), compost_pos + Vector3(0, 0.55, 0))
+	for sx in [-1.0, 1.0]:
+		MK.box(self, Vector3(0.08, 1.0, 1.5), Color.WHITE, compost_pos + Vector3(sx * 0.75, 0.5, 0)).material_override = bin_m
+	for sz in [-1.0, 1.0]:
+		MK.box(self, Vector3(1.5, 1.0, 0.08), Color.WHITE, compost_pos + Vector3(0, 0.5, sz * 0.75)).material_override = bin_m
+	MK.box(self, Vector3(1.5, 0.06, 1.5), Color(0.2, 0.15, 0.1), compost_pos + Vector3(0, 0.06, 0))
+	var lbl := Label3D.new()
+	lbl.text = "COMPOST"
+	lbl.font_size = 48
+	lbl.pixel_size = 0.0035
+	lbl.modulate = Color(0.85, 0.88, 0.8)
+	lbl.outline_size = 0
+	lbl.position = compost_pos + Vector3(0, 0.62, 0.79)
+	lbl.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	lbl.double_sided = false
+	add_child(lbl)
+
+## The kitchen smoothie maker. Only built once it has been bought, which is why
+## it is not part of _build_garden.
+func _build_smoothie_maker() -> void:
+	if _smoothie_node != null:
+		return
+	var root := Node3D.new()
+	root.position = smoothie_pos
+	add_child(root)
+	_smoothie_node = root
+	var wood := MK.tex_mat(Color(0.6, 0.45, 0.3), _wood_tex, 2.0, 0.9, _wood_norm)
+	# table
+	MK.static_box(root, Vector3(1.6, 0.8, 1.0), Vector3(0, 0.4, 0))
+	MK.box(root, Vector3(1.6, 0.1, 1.0), Color.WHITE, Vector3(0, 0.78, 0)).material_override = wood
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			MK.box(root, Vector3(0.1, 0.75, 0.1), Color.WHITE,
+				Vector3(sx * 0.7, 0.38, sz * 0.4)).material_override = wood
+	# base, jug and lid — deliberately oversized, it is meant to take a goblin
+	var base := MK.mat(Color(0.85, 0.86, 0.88))
+	base.metallic = 0.6
+	base.roughness = 0.3
+	MK.box(root, Vector3(0.6, 0.35, 0.6), Color.WHITE, Vector3(0, 1.0, 0)).material_override = base
+	var jug := MK.mat(Color(0.75, 0.85, 0.9, 0.45))
+	jug.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	MK.box(root, Vector3(0.5, 0.8, 0.5), Color.WHITE, Vector3(0, 1.58, 0)).material_override = jug
+	MK.box(root, Vector3(0.56, 0.08, 0.56), Color(0.3, 0.32, 0.35), Vector3(0, 2.02, 0))
+	MK.box(root, Vector3(0.1, 0.16, 0.12), Color(0.2, 0.5, 0.3), Vector3(0.34, 1.05, 0))
+
 # ---------------- corpses ----------------
 
 ## How many bodies the yard will hold. Past this the oldest fades out: they sleep
@@ -1508,6 +1614,55 @@ func take_from_stand(n: int) -> int:
 	stand_eggs -= got
 	ui.refresh()
 	return got
+
+## Smoothies sell alongside the eggs. A visitor takes whichever is there, and
+## prefers the smoothie when both are — they came for something interesting, and
+## a jar of green monster is more interesting than an egg.
+func take_smoothie_from_stand(n: int) -> int:
+	var got := mini(n, stand_smoothies)
+	stand_smoothies -= got
+	ui.refresh()
+	return got
+
+## Move smoothies from the kitchen out to the counter. Returns how many fitted,
+## so the caller can say something useful about the rest.
+func stock_stand_smoothies(n: int) -> int:
+	var room: int = stand_capacity() - stand_eggs - stand_smoothies
+	var moved := mini(mini(n, smoothies), room)
+	if moved <= 0:
+		return 0
+	smoothies -= moved
+	stand_smoothies += moved
+	ui.refresh()
+	return moved
+
+# ---------------- the machines ----------------
+
+## Feed the grinder. Returns false when your hands are empty, so the caller can
+## make the denied noise rather than silently doing nothing.
+func grind_carried_body() -> bool:
+	if not consume_carried_corpse():
+		return false
+	compost += COMPOST_PER_BODY
+	sfx.play("hit", -4.0)
+	spawn_poof(blender_pos + Vector3(0, 1.6, 0), Color(0.35, 0.5, 0.25), 14)
+	spawn_poof(compost_pos + Vector3(0, 0.9, 0), Color(0.3, 0.22, 0.14), 8)
+	ui.whisper("that will do the beds some good")
+	ui.refresh()
+	return true
+
+## Feed the kitchen blender.
+func blend_carried_body() -> bool:
+	if not upgrades.smoothie:
+		return false
+	if not consume_carried_corpse():
+		return false
+	smoothies += SMOOTHIE_PER_BODY
+	sfx.play("hit", -2.0)
+	spawn_poof(smoothie_pos + Vector3(0, 1.6, 0), Color(0.45, 0.75, 0.3), 16)
+	ui.whisper("%d smoothies" % smoothies)
+	ui.refresh()
+	return true
 
 ## Any grown bird out in the yard is fair game for something that walked up
 ## and asked. Ones shut in the coop or already being carried off are not.
@@ -1834,6 +1989,9 @@ func market_items() -> Array:
 		{"id": "helmets", "name": "TINY WAR HELMET", "desc": "fits one hen. she fights at night instead of hiding. air-dropped, because the supplier insists. (%d of %d kitted)" % [helmets_owned(), chickens.size()], "price": helmet_price(), "owned": helmets_owned() >= chickens.size()},
 		{"id": "turret", "name": "EGG TURRET", "desc": "automated yolk-based yard defense.", "price": 250, "owned": upgrades.turret},
 		{"id": "shoes", "name": "RUNNING SHOES", "desc": "+25% farmer speed. they light up. tactically.", "price": 90, "owned": upgrades.shoes},
+		{"id": "smoothie", "name": "INDUSTRIAL SMOOTHIE MAKER",
+			"desc": "a jug big enough for a goblin, delivered to the kitchen table. turns a body into %d smoothies, which the lane pays $%d each for. do not ask what is in them; they will not ask either.",
+			"price": 220, "owned": upgrades.smoothie},
 		{"id": "medkit", "name": "FIRST AID", "desc": "patch yourself back to full.", "price": 15, "owned": false},
 	]
 	if upgrades.fence < 3:
@@ -1864,6 +2022,9 @@ func buy(id: String) -> void:
 			upgrades.rooster = true
 		"feed5":
 			feed += 5
+		"smoothie":
+			upgrades.smoothie = true
+			_build_smoothie_maker()
 		"shotgun":
 			upgrades.shotgun = true
 			shells += 8

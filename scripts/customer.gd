@@ -147,9 +147,15 @@ func tick(delta: float) -> void:
 				game.customer_gone(self)
 
 ## What an honest visitor does at the counter, and what the other sort does.
+##
+## Smoothies go first when both are out. Somebody who has pulled over at a
+## roadside stand is after something they cannot get at a shop, and a jar of
+## green monster beats an egg on that count every time.
 func _do_business() -> void:
 	var want := 1 + randi() % 3
-	_took = game.take_from_stand(want)
+	var jars: int = game.take_smoothie_from_stand(want)
+	var eggs: int = game.take_from_stand(want - jars)
+	_took = jars + eggs
 	if _took <= 0:
 		return
 	# most pay. a few decide the honour system is optional.
@@ -157,7 +163,7 @@ func _do_business() -> void:
 	if _thief:
 		game.ui.whisper("something walked off the stand")
 		return
-	_paid = _took * game.STAND_EGG_PRICE
+	_paid = eggs * game.STAND_EGG_PRICE + jars * game.STAND_SMOOTHIE_PRICE
 	game.add_coins(_paid)
 	game.sfx.play("coin", -8.0)
 
