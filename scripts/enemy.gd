@@ -128,6 +128,9 @@ var _dying := false
 var is_corpse := false
 ## True while the player is carrying it, so nothing else claims it mid-lift.
 var carried_by_player := false
+## The node carrying the model's size. Ragdolls have to strip its scale before
+## physics takes over, so it is kept rather than looked up.
+var _model_holder: Node3D = null
 
 func setup(g: Node3D, night: int, thm: Dictionary, escort := false) -> void:
 	game = g
@@ -349,6 +352,7 @@ func _build_goblin_model(s: float) -> void:
 	holder.position.y = GOBLIN_MODEL_FOOT_OFFSET * ms
 	holder.rotation.y = deg_to_rad(GOBLIN_MODEL_YAW)
 	add_child(holder)
+	_model_holder = holder
 	# Duplicate the imported material per instance, so the damage flash only
 	# lights up the one that got hit, and tint it lightly so a wave isn't
 	# visibly clones.
@@ -2091,6 +2095,19 @@ const RAGDOLL_BONES := [
 func _start_ragdoll() -> bool:
 	if _skel == null:
 		return false
+	# Godot drives the skeleton's bone poses from the bodies' GLOBAL transforms,
+	# so any scale between the skeleton and the world is divided back out of
+	# every pose, every frame — and the corpse inflates without limit until it
+	# fills the screen. The model is scaled to size the goblin, so that scale has
+	# to come off before physics takes over.
+	#
+	# The body therefore snaps to the mesh's native 1.7 m as it dies. On a
+	# standard goblin that is a jump of about a tenth, inside a violent collapse,
+	# which is a cheap price for corpses that stay the size of corpses.
+	if _model_holder != null and not is_equal_approx(_model_holder.scale.x, 1.0):
+		var was: float = _model_holder.scale.x
+		_model_holder.scale = Vector3.ONE
+		_model_holder.position.y *= 1.0 / maxf(was, 0.01)
 	var by_bone := {}
 	for bname in RAGDOLL_BONES:
 		var b := _skel.find_bone(bname)
