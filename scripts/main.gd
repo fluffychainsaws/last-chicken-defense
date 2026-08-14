@@ -1435,6 +1435,7 @@ func _update_corpses(delta: float) -> void:
 		if not is_instance_valid(c):
 			corpses.erase(c)
 			continue
+		c.hold_corpse_scale()
 		if c.carried_by_player:
 			continue
 		if moving and player.position.distance_to(c.global_position) < KICK_REACH + 1.0:

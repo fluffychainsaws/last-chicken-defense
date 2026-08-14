@@ -2133,6 +2133,23 @@ func _bake_model_scale() -> void:
 			skin.set_bind_pose(b, Transform3D(bind.basis.scaled(Vector3.ONE * ms), bind.origin * ms))
 		mi.skin = skin
 
+## Belt and braces, run on every corpse every frame from main._update_corpses.
+##
+## After the bake there should be no scale left between the bones and the world,
+## and there is not one in any test — but this bug has now got out twice, and
+## the failure mode is bad enough to be worth a check rather than a promise: the
+## scale feeds back through the physics round trip, so anything above 1.0
+## compounds, and within a few seconds the body is the size of the barn and
+## shoving the farmer into the sky. Whatever the source, dividing it out here
+## breaks the loop before it can multiply.
+func hold_corpse_scale() -> void:
+	if _skel == null or _model_holder == null:
+		return
+	var gs: float = _skel.global_transform.basis.get_scale().x
+	if absf(gs - 1.0) < 0.001 or gs < 0.001:
+		return
+	_model_holder.scale /= gs
+
 ## Builds the physics bodies and hands the skeleton over. Returns false if the
 ## rig is missing, in which case the caller falls back to an authored clip.
 func _start_ragdoll() -> bool:
