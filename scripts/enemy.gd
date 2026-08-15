@@ -2040,6 +2040,26 @@ func dispose_corpse() -> void:
 func kick(from: Vector3, force: float) -> void:
 	if _skel == null:
 		return
+	# Same story as let_go: with no physics bodies there is nothing to apply an
+	# impulse to, and walking into a corpse did nothing at all. So an
+	# unsimulated one is shoved along the ground instead — less satisfying than
+	# a limb spinning off, but the body does move when booted.
+	var bodies := false
+	for c in _skel.get_children():
+		if c is PhysicalBone3D:
+			bodies = true
+			break
+	if not bodies:
+		var away: Vector3 = global_position - from
+		away.y = 0.0
+		if away.length() < 0.01:
+			return
+		var to := global_position + away.normalized() * clampf(force * 0.12, 0.2, 1.0)
+		to.y = 0.0
+		var tw := create_tween()
+		tw.tween_property(self, "global_position", to, 0.25)\
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		return
 	for c in _skel.get_children():
 		if not (c is PhysicalBone3D):
 			continue
@@ -2061,12 +2081,39 @@ func hold_still() -> void:
 func let_go(impulse: Vector3) -> void:
 	if _skel == null:
 		return
+	var bodies := false
+	for c in _skel.get_children():
+		if c is PhysicalBone3D:
+			bodies = true
+			break
+	# A body that died to an authored fall has no physics to be let go of, so
+	# starting a simulation that is not there just leaves it hanging at shoulder
+	# height wherever the farmer happened to be standing. It gets dropped by
+	# hand instead: thrown a little way out in front, then down onto the grass.
+	if not bodies:
+		_fall_to_ground(Vector3(impulse.x, 0.0, impulse.z) * 0.35)
+		return
 	_skel.physical_bones_start_simulation()
 	if impulse.length() > 0.01:
 		for c in _skel.get_children():
 			if c is PhysicalBone3D and c.bone_name == "Spine01":
 				c.apply_central_impulse(impulse)
 				return
+
+## Drops an unsimulated body the short distance to the ground and lays it out
+## there. Short enough to read as letting go rather than throwing, and it lands
+## flat, because a corpse standing upright in the grass looks alive.
+func _fall_to_ground(toss: Vector3) -> void:
+	var land := global_position + toss
+	land.y = 0.0
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(self, "global_position", land, 0.35)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	# tip it over on the way down if the death clip left it standing
+	if _model_holder != null and absf(_model_holder.rotation.x) < 0.2:
+		tw.tween_property(_model_holder, "rotation:x", -PI * 0.5, 0.35)\
+			.set_trans(Tween.TRANS_QUAD)
 
 ## On by default now, because the bodies are worth something: the blender turns
 ## them into compost and the smoothie maker into stock, and none of that works on
