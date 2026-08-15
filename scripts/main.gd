@@ -1499,11 +1499,15 @@ func _update_corpses(delta: float) -> void:
 		if moving and player.position.distance_to(c.global_position) < KICK_REACH:
 			c.kick(player.global_position, KICK_FORCE * player.velocity.length() / KICK_SPEED)
 	if carried_corpse != null and is_instance_valid(carried_corpse):
-		# slung over the shoulder: out in front, turned across the body, and
-		# swaying a little with the walk so it does not read as welded on
+		# Carried low and off to one side rather than held up in front. At chest
+		# height and dead ahead a goblin fills most of the screen and you cannot
+		# see where you are walking, which is no good when the thing you are
+		# carrying it towards is across the yard.
 		var fwd: Vector3 = -player.global_transform.basis.z
+		var right: Vector3 = player.global_transform.basis.x
 		var sway: float = sin(Time.get_ticks_msec() * 0.004) * 0.05
-		carried_corpse.global_position = player.global_position + fwd * 0.9 + Vector3(0, 1.15 + sway, 0)
+		carried_corpse.global_position = (player.global_position + fwd * 0.55
+			+ right * 0.5 + Vector3(0, 0.5 + sway, 0))
 		carried_corpse.rotation = Vector3(0.0, player.rotation.y, deg_to_rad(78.0))
 	elif carried_corpse != null:
 		carried_corpse = null
