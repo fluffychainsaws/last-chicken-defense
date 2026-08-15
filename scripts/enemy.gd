@@ -2116,10 +2116,26 @@ const RAGDOLL_BONES := [
 func _bake_model_scale() -> void:
 	if _model_holder == null or _skel == null:
 		return
-	var ms: float = _model_holder.scale.x
-	if is_equal_approx(ms, 1.0):
+	# EVERY scaled node between the bones and this enemy, not just the holder.
+	# There are two, and only looking at one is what produced hundred-metre
+	# goblins: the per-goblin size sits on the holder, and under it the armature
+	# still carries the 0.01 that turns the rig's centimetres into metres. Both
+	# have to come off the nodes and both have to go into the skeleton.
+	var ms := 1.0
+	var chain: Array[Node3D] = []
+	var cur: Node = _skel
+	while cur != null and cur != self:
+		if cur is Node3D:
+			chain.append(cur)
+			ms *= cur.scale.x
+		cur = cur.get_parent()
+	if is_equal_approx(ms, 1.0) or ms < 0.0001:
 		return
-	_model_holder.scale = Vector3.ONE
+	# where the rig stands now, so it can be put back after the scales come off
+	var was_at: Vector3 = _skel.global_position
+	for n in chain:
+		n.scale = Vector3.ONE
+	_model_holder.position += was_at - _skel.global_position
 	for i in _skel.get_bone_count():
 		var rest := _skel.get_bone_rest(i)
 		_skel.set_bone_rest(i, Transform3D(rest.basis, rest.origin * ms))
@@ -2132,23 +2148,6 @@ func _bake_model_scale() -> void:
 			var bind := skin.get_bind_pose(b)
 			skin.set_bind_pose(b, Transform3D(bind.basis.scaled(Vector3.ONE * ms), bind.origin * ms))
 		mi.skin = skin
-
-## Belt and braces, run on every corpse every frame from main._update_corpses.
-##
-## After the bake there should be no scale left between the bones and the world,
-## and there is not one in any test — but this bug has now got out twice, and
-## the failure mode is bad enough to be worth a check rather than a promise: the
-## scale feeds back through the physics round trip, so anything above 1.0
-## compounds, and within a few seconds the body is the size of the barn and
-## shoving the farmer into the sky. Whatever the source, dividing it out here
-## breaks the loop before it can multiply.
-func hold_corpse_scale() -> void:
-	if _skel == null or _model_holder == null:
-		return
-	var gs: float = _skel.global_transform.basis.get_scale().x
-	if absf(gs - 1.0) < 0.001 or gs < 0.001:
-		return
-	_model_holder.scale /= gs
 
 ## How far a limb is allowed to get from the hips before the body is declared
 ## broken. A goblin is under two metres with its arms out, so three is already

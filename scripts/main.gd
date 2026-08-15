@@ -1489,7 +1489,6 @@ func _update_corpses(delta: float) -> void:
 		if not is_instance_valid(c):
 			corpses.erase(c)
 			continue
-		c.hold_corpse_scale()
 		c.check_corpse_intact()
 		if c.carried_by_player:
 			continue
