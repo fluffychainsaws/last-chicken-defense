@@ -2131,11 +2131,24 @@ func _bake_model_scale() -> void:
 		cur = cur.get_parent()
 	if is_equal_approx(ms, 1.0) or ms < 0.0001:
 		return
-	# where the rig stands now, so it can be put back after the scales come off
-	var was_at: Vector3 = _skel.global_position
-	for n in chain:
-		n.scale = Vector3.ONE
-	_model_holder.position += was_at - _skel.global_position
+	# Taking a scale off a node moves everything under it, because the children's
+	# own offsets were written expecting to be divided by it — the armature's
+	# 0.01 is holding a centimetre rig down to size, and dropping it alone throws
+	# the mesh a hundred times out into the sky where it is promptly culled. So
+	# every node's world position is noted first and put straight back after,
+	# working downwards so each one is placed under a parent already settled.
+	# Only the scale is allowed to change; nothing moves.
+	chain.reverse()
+	var movers: Array[Node3D] = chain.duplicate()
+	for mi in _mesh_children(_model_holder):
+		movers.append(mi)
+	var was_at: Array[Vector3] = []
+	for n in movers:
+		was_at.append(n.global_position)
+	for i in movers.size():
+		if movers[i] in chain:
+			movers[i].scale = Vector3.ONE
+		movers[i].global_position = was_at[i]
 	for i in _skel.get_bone_count():
 		var rest := _skel.get_bone_rest(i)
 		_skel.set_bone_rest(i, Transform3D(rest.basis, rest.origin * ms))
