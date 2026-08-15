@@ -2008,19 +2008,17 @@ func begin_death() -> bool:
 	# stays until it is dealt with or the yard runs out of room for corpses.
 	# The bodies fall asleep on their own once they stop moving, so a field of
 	# them costs almost nothing to leave lying about.
-	if ragdolled:
-		is_corpse = true
-		game.add_corpse(self)
-		return true
-	var tw := create_tween()
-	tw.tween_interval(fall + GOBLIN_CORPSE_LINGER)
-	# fading the albedo alpha needs the material in a blend mode that has one
-	for m in _mats:
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	tw.tween_method(func(a: float):
-		for m in _mats:
-			m.albedo_color.a = a, 1.0, 0.0, GOBLIN_CORPSE_FADE)
-	tw.tween_callback(queue_free)
+	is_corpse = true
+	game.add_corpse(self)
+	if not ragdolled:
+		# hold the last frame of the fall rather than springing back upright,
+		# and stop the player so nothing rewrites the pose afterwards
+		var tw := create_tween()
+		tw.tween_interval(fall)
+		tw.tween_callback(func():
+			if _anim != null:
+				_anim.pause())
+	return true
 	return true
 
 ## Fades and frees a corpse that has outlived its welcome — either the yard hit
@@ -2074,7 +2072,7 @@ func let_go(impulse: Vector3) -> void:
 ## them into compost and the smoothie maker into stock, and none of that works on
 ## an animated fall that fades out. K still flips back to the authored clips for
 ## comparison, but that path leaves nothing behind to pick up.
-static var ragdoll_deaths := true
+static var ragdoll_deaths := false
 
 ## Fourteen bodies, not one per bone. The first attempt gave all twenty-two a
 ## capsule and the result never came to rest: adjacent limbs overlap at every
