@@ -807,6 +807,8 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.physical_keycode == KEY_N and started and not paused and not over and not is_night:
 			phase_t = 1.0  # debug: skip to night
+		if event.physical_keycode == KEY_J and started and not over:
+			_dump_bodies()
 		if event.physical_keycode == KEY_K and started and not over:
 			# debug: flip between the authored death falls and physics ragdoll,
 			# so the two can be compared inside one night instead of by memory
@@ -1427,6 +1429,58 @@ func nearest_corpse(from: Vector3, radius: float):
 			best = c
 			best_d = d
 	return best
+
+## Debug (J): everything about every body on the field, living or dead.
+##
+## Three attempts at the giant-goblin bug have now been verified in the sandbox
+## and failed on the actual machine, which means the sandbox is not reproducing
+## whatever happens in a real night. Rather than guess a fourth time, this prints
+## the numbers from where the problem is: how big each thing measures, where any
+## scale is coming from, and whether the corpse guard has fired. Press it with a
+## grown one on screen and the console has the answer.
+func _dump_bodies() -> void:
+	print("\n=== BODY DUMP  enemies:%d  corpses:%d ===" % [enemies.size(), corpses.size()])
+	for e in enemies:
+		if is_instance_valid(e):
+			_dump_one("LIVE", e)
+	for c in corpses:
+		if is_instance_valid(c):
+			_dump_one("CORPSE", c)
+	print("=== END DUMP ===\n")
+
+func _dump_one(tag: String, e) -> void:
+	var line := "%s %s  node_scale %.3f" % [tag, str(e.theme.get("id", "?")), e.scale.x]
+	line += "  state %s" % str(e.get("state"))
+	if e.get("is_corpse") != null:
+		line += "  is_corpse %s  broken %s" % [str(e.is_corpse), str(e.get("_corpse_broken"))]
+	var skel = e.get("_skel")
+	if skel == null:
+		print(line + "  (no rig)")
+		return
+	var holder = e.get("_model_holder")
+	line += "  holder %.3f" % (holder.scale.x if holder != null else -1.0)
+	line += "  skel_world %.3f" % skel.global_transform.basis.get_scale().x
+	# what the player actually sees: the spread of the rig in world metres
+	var lo := Vector3(1e9, 1e9, 1e9)
+	var hi := -lo
+	for i in skel.get_bone_count():
+		var p: Vector3 = skel.global_transform * skel.get_bone_global_pose(i).origin
+		lo = Vector3(minf(lo.x, p.x), minf(lo.y, p.y), minf(lo.z, p.z))
+		hi = Vector3(maxf(hi.x, p.x), maxf(hi.y, p.y), maxf(hi.z, p.z))
+	line += "  rig_size %.2f x %.2f x %.2f m" % [hi.x - lo.x, hi.y - lo.y, hi.z - lo.z]
+	var bodies := 0
+	for c in skel.get_children():
+		if c is PhysicalBone3D:
+			bodies += 1
+	line += "  bodies %d" % bodies
+	print(line)
+	# and every scaled node between the bones and the world, which is the thing
+	# three fixes have now assumed was empty
+	var cur: Node = skel
+	while cur != null and cur != self:
+		if cur is Node3D and not is_equal_approx(cur.scale.x, 1.0):
+			print("    scaled ancestor: %s = %.4f" % [cur.name, cur.scale.x])
+		cur = cur.get_parent()
 
 ## Boots whatever you walk into, and keeps a carried body in front of you.
 func _update_corpses(delta: float) -> void:
