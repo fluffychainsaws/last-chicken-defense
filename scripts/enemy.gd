@@ -2213,14 +2213,19 @@ func check_corpse_intact() -> void:
 	# nailed across the yard forever. Throw that pose away and fall back to the
 	# authored death clip, which is what the bodies did before any of this and
 	# always looked like a goblin lying down.
+	# Back to the rest pose, and NOT to a death clip. The clips' position tracks
+	# are still written in the centimetres the rig was authored in, while the
+	# bake has just put the rests in metres — so playing one writes a hundred and
+	# seventy centimetres as a hundred and seventy metres, which is the giant all
+	# over again from a third direction. The rests are the only pose on this
+	# skeleton that is now in the right units.
 	_skel.reset_bone_poses()
 	if _anim != null:
-		var clip: String = GOBLIN_ANIM_DEATHS[randi() % GOBLIN_ANIM_DEATHS.size()]
-		if _anim.has_animation(clip):
-			_play(clip, 1.0, true)
-			# hold the last frame rather than snapping back to standing
-			_anim.advance(_anim.get_animation(clip).length)
-			_anim.pause()
+		_anim.stop()
+	# a rest pose is a goblin standing to attention, so tip it over — face down
+	# in the grass reads as a body, standing upright does not
+	if _model_holder != null:
+		_model_holder.rotation.x = -PI * 0.5
 
 var _corpse_broken := false
 
