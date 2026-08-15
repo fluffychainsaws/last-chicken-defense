@@ -1400,7 +1400,11 @@ const MAX_CORPSES := 14
 const KICK_SPEED := 2.2
 const KICK_FORCE := 3.4
 ## How close the player has to be for a boot to connect.
-const KICK_REACH := 1.3
+## Close enough to actually tread on. This has to stay well inside the 2.2 m
+## the farmer can reach from, or walking up to a body boots it away before it
+## can be picked up — which is exactly what happened when a kick could land
+## from further out than a pair of hands could.
+const KICK_REACH := 0.9
 
 var corpses: Array = []
 ## The body currently over the player's shoulder, if any.
@@ -1492,7 +1496,7 @@ func _update_corpses(delta: float) -> void:
 		c.check_corpse_intact()
 		if c.carried_by_player:
 			continue
-		if moving and player.position.distance_to(c.global_position) < KICK_REACH + 1.0:
+		if moving and player.position.distance_to(c.global_position) < KICK_REACH:
 			c.kick(player.global_position, KICK_FORCE * player.velocity.length() / KICK_SPEED)
 	if carried_corpse != null and is_instance_valid(carried_corpse):
 		# slung over the shoulder: out in front, turned across the body, and

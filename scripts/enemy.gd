@@ -2050,6 +2050,12 @@ func kick(from: Vector3, force: float) -> void:
 			bodies = true
 			break
 	if not bodies:
+		# one boot per contact, not one per frame — otherwise standing beside a
+		# body walks it steadily across the yard and out of arm's reach
+		var now: int = Time.get_ticks_msec()
+		if now - _kicked_at < 700:
+			return
+		_kicked_at = now
 		var away: Vector3 = global_position - from
 		away.y = 0.0
 		if away.length() < 0.01:
@@ -2273,6 +2279,9 @@ func check_corpse_intact() -> void:
 		_model_holder.rotation.x = -PI * 0.5
 
 var _corpse_broken := false
+
+## Stops a body being shoved every frame while the farmer stands next to it.
+var _kicked_at := 0
 
 func _finite(v: Vector3) -> bool:
 	return is_finite(v.x) and is_finite(v.y) and is_finite(v.z)
